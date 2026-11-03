@@ -7,6 +7,7 @@
 import base64
 import ctypes
 import os
+import queue
 import subprocess
 import sys
 import tempfile
@@ -22,6 +23,7 @@ from pathlib import Path
 HERE = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))  # 打包后资源在 _MEIPASS
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import claude_switch as cs  # noqa: E402
+import tray  # noqa: E402
 from i18n import DEFAULT_LANG, LANGS, STRINGS  # noqa: E402
 
 APP_VERSION = "1.3.0"
@@ -238,6 +240,15 @@ class App(Widgets):
             pass
         root.bind_all("<MouseWheel>", self.on_wheel)
 
+        # 托盘：关窗口时缩到托盘，右键菜单直接切换账号。托盘线程的事件放进队列，由界面线程处理
+        self.events = queue.Queue()
+        self.tray = tray.Tray(HERE / "icon.ico", self.events.put)
+        if self.tray.start():
+            root.protocol("WM_DELETE_WINDOW", self.hide_to_tray)
+            self.root.after(150, self.poll_tray)
+        else:
+            self.tray = None
+
         self.build()
         self.refresh()
         self.root.after(60_000, self.tick)
@@ -264,6 +275,8 @@ class App(Widgets):
                 w.destroy()
         pick_font(self.root)
         self.root.title(t("title"))
+        if self.tray:
+            self.tray.labels = {"open": t("tray_open"), "quit": t("tray_quit"), "empty": t("tray_empty")}
         self.build_header()
         self.toast = None
         self.build_footer()
@@ -641,6 +654,7 @@ class App(Widgets):
         for i, a in enumerate(data):
             self.card(i, a, i == best)
         self.fit()
+        self.update_tray(data)
         if not self.placed:  # 第一次显示时居中
             self.placed = True
             self.root.update_idletasks()
@@ -648,6 +662,63 @@ class App(Widgets):
             x = (self.root.winfo_screenwidth() - w) // 2
             y = max(0, (self.root.winfo_screenheight() - h) // 3)
             self.root.geometry(f"+{x}+{y}")
+
+    # ---------- 托盘 ----------
+    def update_tray(self, data):
+        """把账号列表和用量同步到托盘右键菜单和鼠标悬停提示。"""
+        if not self.tray:
+            return
+        items, tip = [], t("title")
+        for a in data:
+            name = a.get("alias") or a["email"]
+            usage = a["usage"] or {}
+            parts = []
+            for key in ("five_hour", "seven_day"):
+                pct, was_reset = window_pct(usage.get(key))
+                if pct is not None:
+                    label = t("five_hour" if key == "five_hour" else "week")
+                    parts.append(f"{label} {t('reset_done') if was_reset else f'{pct:.0f}%'}")
+            items.append((name + ("    " + " · ".join(parts) if parts else ""), a["email"], a["current"]))
+            if a["current"]:
+                tip = t("tray_tip", name=name)
+        self.tray.items = items
+        self.tray.set_tooltip(tip)
+
+    def poll_tray(self):
+        while not self.events.empty():
+            event = self.events.get_nowait()
+            if event[0] == "open":
+                self.show_window()
+            elif event[0] == "quit":
+                self.quit_app()
+                return
+            elif event[0] == "switch":
+                a = next((x for x in self.data or [] if x["email"] == event[1]), None)
+                if a and not a["current"]:
+                    self.switch(a)
+                    if self.root.state() == "withdrawn":  # 窗口藏着时看不到提示条，用系统通知
+                        self.tray.notify(t("title"), t("switched", email=a.get("alias") or a["email"]))
+        self.root.after(150, self.poll_tray)
+
+    def hide_to_tray(self):
+        self.root.withdraw()
+        settings = cs.load_settings()
+        if not settings.get("tray_hint_shown"):  # 第一次缩到托盘时说一声，以后不再提示
+            self.tray.notify(t("title"), t("tray_hidden"))
+            cs.save_settings({**settings, "tray_hint_shown": True})
+
+    def show_window(self):
+        self.root.deiconify()
+        self.root.state("normal")
+        self.root.lift()
+        self.root.attributes("-topmost", True)  # 从后台调到最前面
+        self.root.after(200, lambda: self.root.attributes("-topmost", False))
+        self.root.focus_force()
+
+    def quit_app(self):
+        if self.tray:
+            self.tray.stop()
+        self.root.destroy()
 
     def switch(self, a):
         try:
@@ -835,6 +906,8 @@ def already_running():
     _mutex = kernel32.CreateMutexW(None, False, "Local\\ClaudeAccountSwitch.SingleInstance")
     if kernel32.GetLastError() != 183:  # ERROR_ALREADY_EXISTS
         return False
+    if tray.request_show():  # 已运行的程序可能缩在托盘里，请它自己把窗口显示出来
+        return True
     for strings in STRINGS.values():  # 窗口标题随语言变，两种都找
         hwnd = user32.FindWindowW(None, strings["title"])
         if hwnd:
