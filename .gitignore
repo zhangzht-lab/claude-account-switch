@@ -1,0 +1,8 @@
+build/
+dist/
+*.spec
+__pycache__/
+*.pyc
+# 账号数据不在这个目录，但以防万一
+profiles/
+*.credentials.json
