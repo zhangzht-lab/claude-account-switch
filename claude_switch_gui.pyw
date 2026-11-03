@@ -24,6 +24,7 @@ import claude_switch as cs  # noqa: E402
 APP_VERSION = "1.0.1"
 REPO_URL = "https://gitee.com/zhang-bantao/claude-account-switch"
 SHORTCUT_NAME = "切换Claude账号.lnk"
+WINDOW_TITLE = "Claude 账号切换"
 FONT = "Microsoft YaHei UI"
 WEEKDAYS = "一二三四五六日"
 
@@ -144,7 +145,7 @@ class App:
         self.data = None          # 上次查到的数据，本地每分钟重画倒计时用
         self.fetched_at = None    # 上次刷新时间
 
-        root.title("Claude 账号切换")
+        root.title(WINDOW_TITLE)
         root.configure(bg=C["bg"])
         root.minsize(self.px(600), self.px(300))
         try:
@@ -454,7 +455,24 @@ class App:
         self.refresh()
 
 
+def already_running():
+    """只允许开一个窗口：用命名互斥量判断；已经开着就把那个窗口调到前面，返回 True。"""
+    kernel32, user32 = ctypes.windll.kernel32, ctypes.windll.user32
+    kernel32.CreateMutexW.restype = ctypes.c_void_p
+    global _mutex  # 句柄要一直留着，进程退出时系统自动释放
+    _mutex = kernel32.CreateMutexW(None, False, "Local\\ClaudeAccountSwitch.SingleInstance")
+    if kernel32.GetLastError() != 183:  # ERROR_ALREADY_EXISTS
+        return False
+    hwnd = user32.FindWindowW(None, WINDOW_TITLE)
+    if hwnd:
+        user32.ShowWindow(hwnd, 9)  # SW_RESTORE：最小化了也还原
+        user32.SetForegroundWindow(hwnd)
+    return True
+
+
 def main():
+    if already_running():
+        return
     try:
         ctypes.windll.shcore.SetProcessDpiAwareness(1)  # 高分屏下文字不发虚
     except (AttributeError, OSError):
