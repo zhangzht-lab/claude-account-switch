@@ -24,7 +24,6 @@ import claude_switch as cs  # noqa: E402
 APP_VERSION = "1.0.1"
 REPO_URL = "https://gitee.com/zhang-bantao/claude-account-switch"
 SHORTCUT_NAME = "切换Claude账号.lnk"
-REFRESH_MIN = 5
 FONT = "Microsoft YaHei UI"
 WEEKDAYS = "一二三四五六日"
 
@@ -142,6 +141,8 @@ class App:
         self.loading = False
         self.result = None
         self.placed = False
+        self.data = None          # 上次查到的数据，本地每分钟重画倒计时用
+        self.fetched_at = None    # 上次刷新时间
 
         root.title("Claude 账号切换")
         root.configure(bg=C["bg"])
@@ -169,7 +170,7 @@ class App:
         self.text(self.cards, "正在查询用量…", fg=C["muted"], bg=C["bg"]).pack(padx=self.px(220), pady=self.px(40))
         self.fit()
         self.refresh()
-        self.root.after(REFRESH_MIN * 60_000, self.auto_refresh)
+        self.root.after(60_000, self.tick)
 
         # 建快捷方式要启动 PowerShell，约 1～2 秒，放后台免得窗口卡住
         self.shortcut = None
@@ -403,12 +404,23 @@ class App:
         if kind == "err":
             self.sub.configure(text=f"查询失败：{data}")
             return
+        self.data, self.fetched_at = data, datetime.now()
         self.render(data)
-        self.sub.configure(text=f"{datetime.now():%H:%M} 更新 · 每 {REFRESH_MIN} 分钟自动刷新")
+        self.update_sub()
 
-    def auto_refresh(self):
-        self.refresh()
-        self.root.after(REFRESH_MIN * 60_000, self.auto_refresh)
+    def update_sub(self):
+        if self.loading or not self.fetched_at:
+            return
+        minutes = int((datetime.now() - self.fetched_at).total_seconds() // 60)
+        ago = "刚刚" if minutes < 1 else f"{left_text(minutes)}前"
+        self.sub.configure(text=f"{self.fetched_at:%H:%M} 刷新（{ago}） · 点「刷新」获取最新用量")
+
+    def tick(self):
+        """每分钟只在本地更新「几分钟前」和倒计时，不联网；数据要用户点「刷新」才重新查询。"""
+        if not self.loading and self.data is not None:
+            self.render(self.data)
+            self.update_sub()
+        self.root.after(60_000, self.tick)
 
     def render(self, data):
         for w in self.cards.winfo_children():
