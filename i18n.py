@@ -19,11 +19,7 @@ STRINGS = {
         "switch_failed": "切换失败：{e}",
         "toast_countdown": "{n} 秒后关闭",
         "mismatch": "登录信息对不上：令牌是 {owner} 的，账号却显示 {email}（多半有 VS Code 窗口没 Reload）。已暂停自动保存。\n"
-                    "请在每个 VS Code 窗口 Reload Window 后点「刷新」，或直接切换到想用的账号。",
-        "confirm_title": "切换账号",
-        "confirm_running": "Claude 正在运行。切换时它也可能在写同样的文件，最好先停下手头的对话。\n\n"
-                           "切换到 {email} 后，每个 VS Code 窗口都要执行 Reload Window。\n\n要现在切换吗？",
-        "best": "剩余额度最多",
+                    "请在每个 VS Code 窗口 Reload Window 后点「刷新」，或直接切换到想用的账号。",        "best": "剩余额度最多",
         "in_use": "● 正在使用",
         "switch_btn": "切换到这个账号",
         "five_hour": "5 小时",
@@ -94,11 +90,7 @@ STRINGS = {
         "switch_failed": "切り替えに失敗しました：{e}",
         "toast_countdown": "{n} 秒後に閉じます",
         "mismatch": "ログイン情報が不一致：トークンは {owner}、アカウントは {email} です（Reload していないウィンドウがある可能性）。自動保存を停止中。\n"
-                    "各 VS Code ウィンドウで Reload Window 後に「更新」を押すか、使いたいアカウントに切り替えてください。",
-        "confirm_title": "アカウント切替",
-        "confirm_running": "Claude が実行中です。切替中に同じファイルへ書き込む可能性があるため、作業中の会話を止めてから切り替えることをおすすめします。\n\n"
-                           "{email} に切り替えた後は、各 VS Code ウィンドウで Reload Window を実行してください。\n\n今すぐ切り替えますか？",
-        "best": "残り最多",
+                    "各 VS Code ウィンドウで Reload Window 後に「更新」を押すか、使いたいアカウントに切り替えてください。",        "best": "残り最多",
         "in_use": "● 使用中",
         "switch_btn": "このアカウントに切替",
         "five_hour": "5 時間",

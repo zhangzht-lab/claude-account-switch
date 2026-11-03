@@ -13,7 +13,6 @@ import tempfile
 import threading
 import tkinter as tk
 import tkinter.font as tkfont
-from tkinter import messagebox
 import webbrowser
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -592,10 +591,6 @@ class App(Widgets):
             self.root.geometry(f"+{x}+{y}")
 
     def switch(self, a):
-        # Claude Code 运行时也会写这两个文件，同时写可能互相覆盖：先提醒一下
-        if cs.claude_running() and not messagebox.askokcancel(
-                t("confirm_title"), t("confirm_running", email=a["email"]), parent=self.root):
-            return
         try:
             cs.switch_to(a["path"])
         except Exception as e:

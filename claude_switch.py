@@ -14,7 +14,6 @@ MCP 登录（mcpOAuth）和其他设置不动，所有账号共用。
 import json
 import os
 import shutil
-import subprocess
 import threading
 import time
 import urllib.error
@@ -105,16 +104,6 @@ def save_current():
     PROFILES.mkdir(parents=True, exist_ok=True)
     dump(PROFILES / f"{email}.json", {"claudeAiOauth": oauth, "oauthAccount": account})
     return email
-
-
-def claude_running():
-    """Claude Code（VS Code 插件或命令行）是否在运行。"""
-    try:
-        out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq claude.exe", "/NH"], capture_output=True,
-                             text=True, errors="ignore", creationflags=0x08000000, timeout=10).stdout
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return "claude.exe" in out.lower()
 
 
 def switch_to(path):
