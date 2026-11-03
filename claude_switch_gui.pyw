@@ -55,8 +55,6 @@ TONES = {  # (文字, 背景)
     "blue": ("#175CD3", "#EFF8FF"),
 }
 AVATAR = ["#D97757", "#7A5AF8", "#2E90FA", "#12B76A", "#F79009", "#EE46BC"]
-NOTE_KEYS = {"invalid": "note_invalid", "rate": "note_rate", "http": "note_http",
-             "error": "note_error", "wait": "note_wait", "expired": "note_expired"}
 
 lang = DEFAULT_LANG
 
@@ -82,13 +80,13 @@ def collect():
 
     def one(p):
         is_cur = p.stem.lower() == now_email
-        usage, note = cs.get_usage(p, is_cur)
+        usage, source, at = cs.get_usage(p.stem, is_cur)
         try:
             oauth = (cs.current()[1] if is_cur else None) or cs.load(p)["claudeAiOauth"]
         except (OSError, ValueError, KeyError):
             oauth = {}
         return {"path": p, "email": p.stem, "current": is_cur, "usage": usage,
-                "note": note, "oauth": oauth}
+                "source": source, "at": at, "oauth": oauth}
 
     with ThreadPoolExecutor(max_workers=max(1, len(items))) as pool:
         return list(pool.map(one, items))
@@ -147,13 +145,13 @@ def reset_text(iso):
     return t("reset_at", when=when, left=left_text(minutes))
 
 
-def note_text(note):
-    base = t(NOTE_KEYS[note["code"]], arg=note["arg"])
-    if note["stale"] == "cache":
-        return t("note_stale_cache", note=base)
-    if note["stale"]:
-        return t("note_stale", note=base, when=datetime.fromtimestamp(note["stale"]).strftime("%m/%d %H:%M"))
-    return base
+def window_pct(u):
+    """返回 (显示的百分比, 是否已过重置时间)。数据是以前记下的，重置时间过了就按 0% 算。"""
+    if not u or u.get("utilization") is None:
+        return None, False
+    if u.get("resets_at") and datetime.fromisoformat(u["resets_at"]).astimezone() <= datetime.now().astimezone():
+        return 0, True
+    return u["utilization"], False
 
 
 def level_color(pct):
@@ -163,7 +161,7 @@ def level_color(pct):
 def score(a):
     """越小表示剩余额度越多；取 5 小时和本周里更紧张的那个。"""
     u = a["usage"] or {}
-    vals = [(u.get(k) or {}).get("utilization") for k in ("five_hour", "seven_day")]
+    vals = [window_pct(u.get(k))[0] for k in ("five_hour", "seven_day")]
     vals = [v for v in vals if v is not None]
     return max(vals) if vals else None
 
@@ -456,26 +454,35 @@ class App(Widgets):
         row = 0
         for key in ("five_hour", "seven_day"):
             u = usage.get(key)
-            if not u or u.get("utilization") is None:
+            pct, was_reset = window_pct(u)
+            if pct is None:
                 continue
-            pct = u["utilization"]
             pady = (self.px(4) if row else 0, 0)
             name = t("five_hour" if key == "five_hour" else "week")
             self.text(grid, name, size=10, fg=C["muted"]).grid(row=row, column=0, sticky="w", pady=pady)
             self.bar(grid, pct).grid(row=row, column=1, padx=(self.px(12), self.px(10)), pady=pady)
             self.text(grid, f"{pct:.0f}%", size=10, bold=True, fg=level_color(pct), width=4,
                       anchor="e").grid(row=row, column=2, sticky="e", pady=pady)
-            reset = reset_text(u["resets_at"]) if u.get("resets_at") else ""
-            if pct >= 100:
-                reset = t("used_up") + reset
+            if was_reset:
+                reset = t("reset_since")
+            else:
+                reset = reset_text(u["resets_at"]) if u.get("resets_at") else ""
+                if pct >= 100:
+                    reset = t("used_up") + reset
             self.text(grid, reset, size=9, fg=C["muted"]).grid(row=row, column=3, sticky="w",
                                                                padx=(self.px(12), 0), pady=pady)
             row += 1
-        note = a["note"]
-        if note:
-            bad = note["code"] in ("invalid", "http", "error") and not note["stale"]
-            self.text(body, note_text(note), size=9, fg=TONES["red" if bad else "amber"][0],
-                      wraplength=self.px(500), justify="left").pack(anchor="w", pady=(self.px(4), 0))
+
+        # 数据来源：只读本机，所以标明是哪个时间的数据
+        if a["source"]:
+            at = datetime.fromtimestamp(a["at"])
+            when = f"{at:%H:%M}" if at.date() == datetime.now().date() else f"{at:%m/%d %H:%M}"
+            src = t("src_live" if a["source"] == "live" else "src_last", at=when)
+            fg = C["faint"]
+        else:
+            src, fg = t("src_none"), TONES["amber"][0]
+        self.text(body, src, size=9, fg=fg, wraplength=self.px(520), justify="left").pack(
+            anchor="w", pady=(self.px(6) if row else 0, 0))
 
     def login_text(self, oauth):
         ms = oauth.get("refreshTokenExpiresAt")
