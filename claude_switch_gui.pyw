@@ -301,9 +301,11 @@ class App(Widgets):
         self.tips.pack(side="left", anchor="w")
 
     def show_banner(self, msg, tone, seconds=3):
-        """提示条浮在卡片区上方（place，不占布局），倒计时结束自动消失，窗口大小不变。"""
-        if self.toast and self.toast.winfo_exists():
-            self.toast.destroy()
+        """提示条放在账号列表上方，倒计时结束自动消失。
+
+        出现时卡片区相应变矮（多出的卡片用滚动条看），消失后再恢复，所以窗口大小始终不变（见 fit）。
+        """
+        self.hide_banner(refit=False)
         fg, bg = TONES[tone]
         box = tk.Frame(self.root, bg=bg, highlightthickness=1, highlightbackground=fg)
         self.toast = box
@@ -311,25 +313,35 @@ class App(Widgets):
         right.pack(side="right", padx=(0, self.px(12)))
         close = tk.Label(right, text="✕", font=(FONT, 10), fg=fg, bg=bg, cursor="hand2")
         close.pack(side="right")
-        close.bind("<Button-1>", lambda e: box.destroy())
+        close.bind("<Button-1>", lambda e: self.hide_banner(box))
         count = tk.Label(right, font=(FONT, 9), fg=fg, bg=bg)
         count.pack(side="right", padx=(0, self.px(10)))
         width = max(self.px(300), self.view.winfo_width() - self.px(150))  # 右边留给倒计时和 ✕
         tk.Label(box, text=msg, font=(FONT, 10), fg=fg, bg=bg, justify="left",
                  wraplength=width).pack(side="left", padx=self.px(14), pady=self.px(8))
-        box.place(in_=self.view, x=0, y=0, relwidth=1.0)
-        box.lift()
+        box.pack(fill="x", padx=self.px(24), pady=(0, self.px(10)), before=self.view)
+        self.fit()
 
         def tick(n):
-            if not box.winfo_exists():
+            if self.toast is not box or not box.winfo_exists():
                 return
             if n <= 0:
-                box.destroy()
+                self.hide_banner(box)
                 return
             count.configure(text=t("toast_countdown", n=n))
             box.after(1000, tick, n - 1)
 
         tick(seconds)
+
+    def hide_banner(self, box=None, refit=True):
+        """关掉提示条；传了 box 时只关这一条（避免旧倒计时关掉新提示）。"""
+        if self.toast is None or (box is not None and box is not self.toast):
+            return
+        if self.toast.winfo_exists():
+            self.toast.destroy()
+        self.toast = None
+        if refit:
+            self.fit()
 
     def fit(self):
         """卡片区高度在「2 张卡片」到「3 张卡片」之间：窗口只能在这个范围内拉高缩矮，
@@ -339,7 +351,9 @@ class App(Widgets):
         # 底部说明按卡片宽度换行，免得把窗口撑宽或和设置按钮重叠
         self.tips.configure(wraplength=max(self.px(280), need_w - self.settings_btn.winfo_reqwidth() - self.px(16)))
         self.root.update_idletasks()
-        others = self.root.winfo_reqheight() - int(self.view.cget("height"))
+        # 提示条占的高度从卡片区里扣，窗口总高度不变
+        toast_h = self.toast.winfo_reqheight() + self.px(10) if self.toast and self.toast.winfo_exists() else 0
+        others = self.root.winfo_reqheight() - int(self.view.cget("height")) - toast_h
         avail = self.root.winfo_screenheight() - self.px(100) - others  # 留出标题栏和任务栏
         if self.data:  # 账号卡片
             heights = [c.winfo_reqheight() + self.px(10) for c in self.cards.winfo_children()]
@@ -349,7 +363,8 @@ class App(Widgets):
         hi = max(self.px(120), min(hi, avail))
         lo = min(lo, hi)
         self.view_need = need_h
-        self.view.configure(width=need_w, height=hi, scrollregion=(0, 0, need_w, need_h))
+        self.view.configure(width=need_w, height=max(self.px(40), hi - toast_h),
+                            scrollregion=(0, 0, need_w, need_h))
         self.root.update_idletasks()
         self.root.minsize(self.root.winfo_reqwidth(), others + lo)
         self.root.maxsize(self.root.winfo_screenwidth(), others + hi)
@@ -367,7 +382,9 @@ class App(Widgets):
             h = int(self.view.cget("height"))
         need = self.view_need > h + 1
         if need and not self.vbar.winfo_ismapped():
-            self.vbar.pack(side="right", fill="y", padx=(self.px(4), self.px(8)), before=self.view)
+            # 滚动条 + 两侧间距正好等于原来的右边距，出现/消失时窗口宽度不变
+            right = max(0, self.px(24) - self.px(4) - self.vbar.winfo_reqwidth())
+            self.vbar.pack(side="right", fill="y", padx=(self.px(4), right), before=self.view)
             self.view.pack_configure(padx=(self.px(24), 0))
         elif not need and self.vbar.winfo_ismapped():
             self.vbar.pack_forget()
