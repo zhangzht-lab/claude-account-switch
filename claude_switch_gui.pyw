@@ -28,7 +28,8 @@ REPO_URL = "https://gitee.com/zhang-bantao/claude-account-switch"
 RELEASES_URL = REPO_URL + "/releases"
 LATEST_API = "https://gitee.com/api/v5/repos/zhang-bantao/claude-account-switch/releases/latest"
 FONT = "Microsoft YaHei UI"
-MAX_VISIBLE_CARDS = 3
+MIN_VISIBLE_CARDS = 2   # 窗口最矮时能看到的卡片数
+MAX_VISIBLE_CARDS = 3   # 窗口最高时能看到的卡片数，更多的用滚动条
 
 C = {
     "bg": "#F4F5F8",
@@ -264,11 +265,11 @@ class App(Widgets):
         self.view = tk.Canvas(self.root, bg=C["bg"], highlightthickness=0)
         self.vbar = tk.Scrollbar(self.root, orient="vertical", command=self.view.yview)
         self.view.configure(yscrollcommand=self.vbar.set)
-        self.view.pack(side="left", fill="both", expand=True, padx=(self.px(24), 0))
+        self.view.pack(side="left", fill="both", expand=True, padx=(self.px(24), self.px(24)))
+        self.view_need = 0
         self.cards = tk.Frame(self.view, bg=C["bg"])
-        item = self.view.create_window(0, 0, window=self.cards, anchor="nw")
-        # 窗口比卡片宽时，让卡片跟着撑满
-        self.view.bind("<Configure>", lambda e: self.view.itemconfigure(item, width=e.width))
+        self.view_item = self.view.create_window(0, 0, window=self.cards, anchor="nw")
+        self.view.bind("<Configure>", self.on_view_resize)
 
         if self.data is None:
             self.text(self.cards, t("loading"), fg=C["muted"], bg=C["bg"]).pack(
@@ -314,7 +315,8 @@ class App(Widgets):
         self.fit()
 
     def fit(self):
-        """按内容定 Canvas 高度；超出屏幕就限高并显示滚动条，窗口底部不超出屏幕。"""
+        """卡片区高度在「2 张卡片」到「3 张卡片」之间：窗口只能在这个范围内拉高缩矮，
+        放不下的卡片一律用滚动条看。屏幕太矮时上限再缩，窗口底部不超出屏幕。"""
         self.root.update_idletasks()
         need_h, need_w = self.cards.winfo_reqheight(), self.cards.winfo_reqwidth()
         # 底部说明按卡片宽度换行，免得把窗口撑宽或和设置按钮重叠
@@ -322,22 +324,42 @@ class App(Widgets):
         self.root.update_idletasks()
         others = self.root.winfo_reqheight() - int(self.view.cget("height"))
         avail = self.root.winfo_screenheight() - self.px(100) - others  # 留出标题栏和任务栏
-        cards = self.cards.winfo_children()
-        if len(cards) > MAX_VISIBLE_CARDS:  # 最多显示 3 张卡片，其余用滚动条
-            avail = min(avail, sum(c.winfo_reqheight() + self.px(10) for c in cards[:MAX_VISIBLE_CARDS]))
-        h = max(self.px(160), min(need_h, avail))
-        self.view.configure(width=need_w, height=h, scrollregion=(0, 0, need_w, need_h))
-        if need_h > h:
-            self.vbar.pack(side="right", fill="y", padx=(self.px(4), self.px(8)))
-        else:
-            self.vbar.pack_forget()
-            self.view.yview_moveto(0)
-        self.view.pack_configure(padx=(self.px(24), 0 if need_h > h else self.px(24)))
+        if self.data:  # 账号卡片
+            heights = [c.winfo_reqheight() + self.px(10) for c in self.cards.winfo_children()]
+            lo, hi = sum(heights[:MIN_VISIBLE_CARDS]), sum(heights[:MAX_VISIBLE_CARDS])
+        else:  # 「正在查询」「还没有账号」这类提示
+            lo = hi = need_h
+        hi = max(self.px(120), min(hi, avail))
+        lo = min(lo, hi)
+        self.view_need = need_h
+        self.view.configure(width=need_w, height=hi, scrollregion=(0, 0, need_w, need_h))
+        self.root.update_idletasks()
+        self.root.minsize(self.root.winfo_reqwidth(), others + lo)
+        self.root.maxsize(self.root.winfo_screenwidth(), others + hi)
+        self.update_scrollbar()
         self.root.update_idletasks()
         bottom = self.root.winfo_rooty() + self.root.winfo_reqheight()
         limit = self.root.winfo_screenheight() - self.px(60)
         if self.placed and bottom > limit:
             self.root.geometry(f"+{self.root.winfo_x()}+{max(0, self.root.winfo_y() - (bottom - limit))}")
+
+    def update_scrollbar(self, height=None):
+        """按卡片区实际高度决定要不要滚动条（拉伸窗口时也会调用）。"""
+        h = height or self.view.winfo_height()
+        if h <= 1:  # 还没显示出来时用设定高度
+            h = int(self.view.cget("height"))
+        need = self.view_need > h + 1
+        if need and not self.vbar.winfo_ismapped():
+            self.vbar.pack(side="right", fill="y", padx=(self.px(4), self.px(8)), before=self.view)
+            self.view.pack_configure(padx=(self.px(24), 0))
+        elif not need and self.vbar.winfo_ismapped():
+            self.vbar.pack_forget()
+            self.view.pack_configure(padx=(self.px(24), self.px(24)))
+            self.view.yview_moveto(0)
+
+    def on_view_resize(self, e):
+        self.view.itemconfigure(self.view_item, width=e.width)  # 窗口比卡片宽时，让卡片跟着撑满
+        self.update_scrollbar(e.height)
 
     def on_wheel(self, e):
         if self.vbar.winfo_exists() and self.vbar.winfo_ismapped():
