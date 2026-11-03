@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import claude_switch as cs  # noqa: E402
 from i18n import DEFAULT_LANG, LANGS, STRINGS  # noqa: E402
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 REPO_URL = "https://gitee.com/zhang-bantao/claude-account-switch"
 RELEASES_URL = REPO_URL + "/releases"
 LATEST_API = "https://gitee.com/api/v5/repos/zhang-bantao/claude-account-switch/releases/latest"
@@ -57,6 +57,8 @@ TONES = {  # (文字, 背景)
 AVATAR = ["#D97757", "#7A5AF8", "#2E90FA", "#12B76A", "#F79009", "#EE46BC"]
 
 lang = DEFAULT_LANG
+online = True   # 设置「联网查询当前账号用量」，保存在 settings.json 的 online
+NOTE_CODES = ("wait", "invalid", "rate", "http", "error")  # 联网没查成时，在当前账号卡片上说明原因
 
 
 def pick_font(root):
@@ -73,8 +75,10 @@ def t(key, **kw):
 
 
 def collect():
-    """在后台线程里跑：保存当前账号，查询所有账号的用量和令牌状态。"""
+    """在后台线程里跑：保存当前账号；开了联网查询就查一次当前账号的用量；再读出所有账号的数据。
+    返回 (账号列表, 联网结果)。联网结果是 cs.fetch_current_usage() 的 (code, arg)，没开为 ("off", None)。"""
     cs.save_current()
+    fetch = cs.fetch_current_usage() if online else ("off", None)
     items = cs.profiles()
     now_email = (cs.current()[0] or "").lower()
 
@@ -85,11 +89,12 @@ def collect():
             oauth = (cs.current()[1] if is_cur else None) or cs.load(p)["claudeAiOauth"]
         except (OSError, ValueError, KeyError):
             oauth = {}
+        note = fetch if is_cur and fetch[0] in NOTE_CODES else None
         return {"path": p, "email": p.stem, "current": is_cur, "usage": usage,
-                "source": source, "at": at, "oauth": oauth}
+                "source": source, "at": at, "oauth": oauth, "note": note}
 
     with ThreadPoolExecutor(max_workers=max(1, len(items))) as pool:
-        return list(pool.map(one, items))
+        return list(pool.map(one, items)), fetch
 
 
 def ensure_shortcut():
@@ -289,7 +294,8 @@ class App(Widgets):
         foot.pack(side="bottom", fill="x", padx=self.px(24), pady=(self.px(2), self.px(14)))
         self.settings_btn = self.button(foot, "⚙ " + t("settings"), self.open_settings, kind="ghost", size=9)
         self.settings_btn.pack(side="right", anchor="s")
-        self.tips = self.text(foot, t("footer"), size=9, fg=C["faint"], bg=C["bg"], justify="left")
+        tips = t("footer") + "\n" + t("footer_online" if online else "footer_local")
+        self.tips = self.text(foot, tips, size=9, fg=C["faint"], bg=C["bg"], justify="left")
         self.tips.pack(side="left", anchor="w")
 
     def show_banner(self, msg, tone, seconds=3):
@@ -469,16 +475,20 @@ class App(Widgets):
                                                                padx=(self.px(12), 0), pady=pady)
             row += 1
 
-        # 数据来源：只读本机，所以标明是哪个时间的数据
+        # 数据来源：标明是哪里、哪个时间的数据
         if a["source"]:
             at = datetime.fromtimestamp(a["at"])
             when = f"{at:%H:%M}" if at.date() == datetime.now().date() else f"{at:%m/%d %H:%M}"
-            src = t("src_live" if a["source"] == "live" else "src_last", at=when)
+            src = t("src_" + a["source"], at=when)
             fg = C["faint"]
         else:
             src, fg = t("src_none"), TONES["amber"][0]
         self.text(body, src, size=9, fg=fg, wraplength=self.px(520), justify="left").pack(
             anchor="w", pady=(self.px(6) if row else 0, 0))
+        if a.get("note"):  # 这次联网没查成的原因
+            code, arg = a["note"]
+            self.text(body, t("note_" + code, arg=arg), size=9, fg=TONES["amber"][0],
+                      wraplength=self.px(520), justify="left").pack(anchor="w")
 
     def login_text(self, oauth):
         ms = oauth.get("refreshTokenExpiresAt")
@@ -524,13 +534,16 @@ class App(Widgets):
             self.root.after(100, self.poll)
             return
         self.loading = False
-        kind, data = self.result
+        kind, val = self.result
         if kind == "err":
-            self.sub.configure(text=t("load_failed", e=data))
+            self.sub.configure(text=t("load_failed", e=val))
             return
+        data, (code, arg) = val
         self.data, self.fetched_at = data, datetime.now()
         self.render(data)
         self.update_sub()
+        if code == "limited":
+            self.show_banner(t("online_limited", s=arg), "amber")
 
     def update_sub(self):
         if self.loading or not self.fetched_at:
@@ -593,6 +606,17 @@ class App(Widgets):
         if self.settings_win and self.settings_win.winfo_exists():
             self.settings_win.close()
         self.build()
+        self.open_settings("general")
+
+    def set_online(self, on):
+        global online
+        if on == online:
+            return
+        online = on
+        cs.save_settings({**cs.load_settings(), "online": on})
+        if self.settings_win and self.settings_win.winfo_exists():
+            self.settings_win.close()
+        self.build()  # 底部说明随开关变
         self.open_settings("general")
 
 
@@ -659,17 +683,26 @@ class SettingsWindow(tk.Toplevel, Widgets):
     def page_general(self, body):
         self.text(body, t("nav_general"), size=13, bold=True).pack(anchor="w")
         self.text(body, t("language"), size=10, fg=C["muted"]).pack(anchor="w", pady=(self.px(18), self.px(8)))
+        self.segmented(body, list(LANGS.items()), lang, self.app.set_lang)
+        self.text(body, t("language_hint"), size=9, fg=C["faint"]).pack(anchor="w", pady=(self.px(8), 0))
+
+        self.text(body, t("online_label"), size=10, fg=C["muted"]).pack(anchor="w", pady=(self.px(20), self.px(8)))
+        self.segmented(body, [(True, t("online_on")), (False, t("online_off"))], online, self.app.set_online)
+        self.text(body, t("online_hint"), size=9, fg=C["faint"], wraplength=self.px(370),
+                  justify="left").pack(anchor="w", pady=(self.px(8), 0))
+
+    def segmented(self, body, options, value, on_pick):
+        """一排互斥按钮（选中的是橙色）。"""
         seg = tk.Frame(body, bg=C["card"])
         seg.pack(anchor="w")
-        for code, name in LANGS.items():
-            on = code == lang
+        for code, name in options:
+            on = code == value
             lb = tk.Label(seg, text=name, font=(FONT, 10, "bold" if on else "normal"),
                           bg=C["accent"] if on else C["card"], fg="#FFFFFF" if on else C["text"],
                           padx=self.px(18), pady=self.px(6), cursor="hand2",
                           highlightthickness=1, highlightbackground=C["accent"] if on else C["border"])
             lb.pack(side="left", padx=(0, self.px(8)))
-            lb.bind("<Button-1>", lambda e, c=code: self.app.set_lang(c))
-        self.text(body, t("language_hint"), size=9, fg=C["faint"]).pack(anchor="w", pady=(self.px(8), 0))
+            lb.bind("<Button-1>", lambda e, c=code: on_pick(c))
 
     def page_about(self, body):
         self.text(body, t("nav_about"), size=13, bold=True).pack(anchor="w")
@@ -742,11 +775,12 @@ def already_running():
 
 
 def main():
-    global lang
+    global lang, online
     if already_running():
         return
-    saved = cs.load_settings().get("lang")
-    lang = saved if saved in STRINGS else DEFAULT_LANG
+    settings = cs.load_settings()
+    lang = settings.get("lang") if settings.get("lang") in STRINGS else DEFAULT_LANG
+    online = settings.get("online", True) is not False
     try:
         ctypes.windll.shcore.SetProcessDpiAwareness(1)  # 高分屏下文字不发虚
     except (AttributeError, OSError):

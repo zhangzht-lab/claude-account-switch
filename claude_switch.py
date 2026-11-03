@@ -6,8 +6,9 @@
 每个账号的这两段存到 ~/.claude-accounts/profiles/<邮箱>.json，切换时换回去。
 MCP 登录（mcpOAuth）和其他设置不动，所有账号共用。
 
-用量：完全本地，不访问 Anthropic。当前账号读 Claude Code 自己缓存在 ~/.claude.json 的用量，
-其他账号显示上次使用时记下的数据（usage-cache.json）。令牌只由 Claude Code 自己续期。
+用量：其他账号只显示上次使用时记下的数据（usage-cache.json），不联网。
+当前账号：设置里开了「联网查询」时，点「刷新」联网查一次（1 分钟最多 3 次）；
+否则读 Claude Code 自己缓存在 ~/.claude.json 的用量。令牌只由 Claude Code 自己续期。
 """
 
 import json
@@ -15,6 +16,7 @@ import os
 import shutil
 import threading
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -25,6 +27,10 @@ STORE = HOME / ".claude-accounts"
 PROFILES = STORE / "profiles"
 USAGE_CACHE = STORE / "usage-cache.json"
 SETTINGS = STORE / "settings.json"
+ONLINE_LOG = STORE / "online-log.json"
+
+USAGE_URL = "https://api.anthropic.com/api/oauth/usage"  # 和 Claude 插件面板查用量用的是同一个
+ONLINE_LIMIT, ONLINE_WINDOW = 3, 60                      # 联网查询：1 分钟最多 3 次
 
 
 def load(path):
@@ -83,14 +89,78 @@ def switch_to(path):
     dump(CONF, conf)
 
 
-def http_json(url):
-    """只用于「关于」页的检查更新（查 Gitee 发行版），不访问 Anthropic。"""
-    req = urllib.request.Request(url, headers={"User-Agent": "claude-account-switch"})
+def http_json(url, token=None):
+    headers = {"User-Agent": "claude-account-switch"}
+    if token:
+        headers["Authorization"] = "Bearer " + token
+        headers["anthropic-beta"] = "oauth-2025-04-20"
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=15) as r:
         return json.load(r)
 
 
 _cache_lock = threading.Lock()
+
+
+def remember_usage(email, usage, at, src):
+    """存一份用量到 usage-cache.json；只在比已有的更新时才覆盖。src 是 "online" 或 "claude"。"""
+    with _cache_lock:
+        try:
+            saved = load(USAGE_CACHE)
+        except (OSError, ValueError):
+            saved = {}
+        old = saved.get(email.lower())
+        if not old or old["at"] < at:
+            saved[email.lower()] = {"usage": usage, "at": at, "src": src}
+            STORE.mkdir(parents=True, exist_ok=True)
+            dump(USAGE_CACHE, saved)
+
+
+def online_wait():
+    """联网查询限频：1 分钟最多 ONLINE_LIMIT 次。返回还要等几秒，0 表示现在可以查。
+    记录存在文件里，重开程序也算数。"""
+    now = time.time()
+    try:
+        log = [t for t in load(ONLINE_LOG) if now - t < ONLINE_WINDOW]
+    except (OSError, ValueError, TypeError):
+        log = []
+    if len(log) < ONLINE_LIMIT:
+        return 0
+    return int(ONLINE_WINDOW - (now - min(log))) + 1
+
+
+def fetch_current_usage():
+    """联网查一次当前账号的用量（和 Claude 插件面板发的请求一样），结果存进 usage-cache.json。
+
+    只查当前账号、只用还没过期的访问令牌，从不刷新令牌：刷新令牌是一次性的，
+    换一次旧的就作废，还开着的 Claude Code 会话会因此掉线（「OAuth session expired」）。
+    返回 (code, arg)：ok / limited(秒数) / wait / invalid / rate / http(状态码) / error(异常名) / none。
+    """
+    email, oauth, account = current()
+    if not email:
+        return "none", None
+    if oauth.get("expiresAt", 0) < time.time() * 1000 + 60_000:
+        return "wait", None  # 令牌过期了，等 Claude Code 自己续期
+    wait = online_wait()
+    if wait:
+        return "limited", wait
+    now = time.time()
+    try:
+        log = [t for t in load(ONLINE_LOG) if now - t < ONLINE_WINDOW]
+    except (OSError, ValueError, TypeError):
+        log = []
+    STORE.mkdir(parents=True, exist_ok=True)
+    dump(ONLINE_LOG, log + [now])
+    try:
+        usage = http_json(USAGE_URL, token=oauth["accessToken"])
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            return "invalid", None
+        return ("rate", None) if e.code == 429 else ("http", e.code)
+    except (OSError, ValueError, KeyError) as e:
+        return "error", type(e).__name__
+    remember_usage(email, usage, int(now), "online")
+    return "ok", None
 
 
 def snapshot_usage():
@@ -110,25 +180,15 @@ def snapshot_usage():
     if not email or not cache.get("utilization") or cache.get("accountUuid") != account.get("accountUuid"):
         return False
     at = int((cache.get("fetchedAtMs") or 0) / 1000) or int(time.time())
-    with _cache_lock:
-        try:
-            saved = load(USAGE_CACHE)
-        except (OSError, ValueError):
-            saved = {}
-        old = saved.get(email.lower())
-        if not old or old["at"] < at:
-            saved[email.lower()] = {"usage": cache["utilization"], "at": at}
-            STORE.mkdir(parents=True, exist_ok=True)
-            dump(USAGE_CACHE, saved)
+    remember_usage(email, cache["utilization"], at, "claude")
     return True
 
 
 def get_usage(email, is_current):
     """返回 (用量 dict 或 None, 来源, 数据时间戳)。只读本机文件，不联网。
 
-    来源："live" = Claude Code 当前缓存里的（当前账号）；"last" = 以前记下的；None = 没有数据。
-    本工具也从不刷新令牌：刷新令牌是一次性的，换一次旧的就作废，
-    还开着的 Claude Code 会话会因此掉线（「OAuth session expired」）。
+    来源："online" = 刚联网查到的（当前账号）；"live" = Claude Code 缓存里的（当前账号）；
+    "last" = 以前记下的；None = 没有数据。
     """
     live = snapshot_usage() if is_current else False
     try:
@@ -137,7 +197,13 @@ def get_usage(email, is_current):
         hit = None
     if not hit:
         return None, None, None
-    return hit["usage"], "live" if live else "last", hit["at"]
+    if not is_current:
+        source = "last"
+    elif hit.get("src") == "online":
+        source = "online"
+    else:
+        source = "live" if live else "last"
+    return hit["usage"], source, hit["at"]
 
 
 def load_settings():
