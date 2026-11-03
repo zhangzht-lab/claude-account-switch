@@ -28,6 +28,7 @@ REPO_URL = "https://gitee.com/zhang-bantao/claude-account-switch"
 RELEASES_URL = REPO_URL + "/releases"
 LATEST_API = "https://gitee.com/api/v5/repos/zhang-bantao/claude-account-switch/releases/latest"
 FONT = "Microsoft YaHei UI"
+MAX_VISIBLE_CARDS = 3
 
 C = {
     "bg": "#F4F5F8",
@@ -321,6 +322,9 @@ class App(Widgets):
         self.root.update_idletasks()
         others = self.root.winfo_reqheight() - int(self.view.cget("height"))
         avail = self.root.winfo_screenheight() - self.px(100) - others  # 留出标题栏和任务栏
+        cards = self.cards.winfo_children()
+        if len(cards) > MAX_VISIBLE_CARDS:  # 最多显示 3 张卡片，其余用滚动条
+            avail = min(avail, sum(c.winfo_reqheight() + self.px(10) for c in cards[:MAX_VISIBLE_CARDS]))
         h = max(self.px(160), min(need_h, avail))
         self.view.configure(width=need_w, height=h, scrollregion=(0, 0, need_w, need_h))
         if need_h > h:
