@@ -18,6 +18,15 @@ STRINGS = {
         "switched": "已切换到 {email}。\n每个 VS Code 窗口按 Ctrl+Shift+P → Reload Window 后生效。",
         "switch_failed": "切换失败：{e}",
         "toast_countdown": "{n} 秒后关闭",
+        "menu_alias": "备注名…",
+        "menu_delete": "删除这个账号…",
+        "menu_delete_current": "正在使用的账号不能删除",
+        "alias_title": "备注名",
+        "alias_prompt": "给 {email} 起个备注名（留空则去掉备注）：",
+        "delete_title": "删除账号",
+        "delete_confirm": "确定删除 {email} 吗？\n\n只删除本工具保存的登录信息、用量记录和备注名，"
+                          "不影响 Claude 账号本身。以后要用，在插件里重新 /login 即可。",
+        "deleted": "已删除 {email}。",
         "mismatch": "登录信息对不上：令牌是 {owner} 的，账号却显示 {email}（多半有 VS Code 窗口没 Reload）。已暂停自动保存。\n"
                     "请在每个 VS Code 窗口 Reload Window 后点「刷新」，或直接切换到想用的账号。",        "best": "剩余额度最多",
         "in_use": "● 正在使用",
@@ -51,7 +60,7 @@ STRINGS = {
         "note_http": "联网查询失败（HTTP {arg}）；先显示本机数据",
         "note_error": "联网查询失败（{arg}）；先显示本机数据",
         "empty": "还没有保存任何账号。\n先在 Claude 插件里 /login，再点「刷新」。",
-        "footer": "添加账号：插件里 /login 后点「刷新」 · 切换后每个 VS Code 窗口执行 Reload Window",
+        "footer": "添加账号：插件里 /login 后会自动出现 · 切换后每个 VS Code 窗口执行 Reload Window",
         "footer_online": "当前账号联网查询（每分钟最多3次） · 账号数据含登录令牌，勿外传",
         "footer_local": "只读本机、不联网 · 账号数据含登录令牌，勿外传",
         # 设置
@@ -89,6 +98,15 @@ STRINGS = {
         "switched": "{email} に切り替えました。\n各 VS Code ウィンドウで Ctrl+Shift+P → Reload Window を実行すると反映されます。",
         "switch_failed": "切り替えに失敗しました：{e}",
         "toast_countdown": "{n} 秒後に閉じます",
+        "menu_alias": "表示名…",
+        "menu_delete": "このアカウントを削除…",
+        "menu_delete_current": "使用中のアカウントは削除できません",
+        "alias_title": "表示名",
+        "alias_prompt": "{email} の表示名（空欄で表示名を削除）：",
+        "delete_title": "アカウント削除",
+        "delete_confirm": "{email} を削除しますか？\n\nこのツールが保存したログイン情報・使用量の記録・表示名だけを削除します。"
+                          "Claude のアカウント自体には影響しません。再び使うときは拡張機能で /login してください。",
+        "deleted": "{email} を削除しました。",
         "mismatch": "ログイン情報が不一致：トークンは {owner}、アカウントは {email} です（Reload していないウィンドウがある可能性）。自動保存を停止中。\n"
                     "各 VS Code ウィンドウで Reload Window 後に「更新」を押すか、使いたいアカウントに切り替えてください。",        "best": "残り最多",
         "in_use": "● 使用中",
@@ -122,7 +140,7 @@ STRINGS = {
         "note_http": "オンライン取得に失敗しました（HTTP {arg}）。ローカルのデータを表示中",
         "note_error": "オンライン取得に失敗しました（{arg}）。ローカルのデータを表示中",
         "empty": "保存済みのアカウントがありません。\nClaude 拡張機能で /login してから「更新」を押してください。",
-        "footer": "アカウント追加：拡張機能で /login 後に「更新」 · 切替後は各 VS Code ウィンドウで Reload Window",
+        "footer": "アカウント追加：拡張機能で /login すると自動で表示 · 切替後は各 VS Code ウィンドウで Reload Window",
         "footer_online": "使用中のみオンライン取得（1分3回まで） · データにはトークンが含まれます（共有禁止）",
         "footer_local": "通信なし · データにはトークンが含まれます（共有禁止）",
         # 設定

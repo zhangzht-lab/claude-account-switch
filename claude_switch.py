@@ -252,3 +252,50 @@ def load_settings():
 def save_settings(settings):
     STORE.mkdir(parents=True, exist_ok=True)
     dump(SETTINGS, settings)
+
+
+def set_alias(email, name):
+    """给账号起备注名（存在 settings.json 的 aliases 里）；name 为空就删掉备注。"""
+    settings = load_settings()
+    aliases = settings.get("aliases") or {}
+    if name and name.strip():
+        aliases[email.lower()] = name.strip()
+    else:
+        aliases.pop(email.lower(), None)
+    save_settings({**settings, "aliases": aliases})
+
+
+def aliases():
+    return {k.lower(): v for k, v in (load_settings().get("aliases") or {}).items()}
+
+
+def delete_account(email):
+    """删除保存的账号：档案、记下的用量、备注名。不能删正在用的账号。返回是否删了。"""
+    if (current()[0] or "").lower() == email.lower():
+        return False
+    path = PROFILES / f"{email}.json"
+    if not path.exists():
+        return False
+    path.unlink()
+    with _cache_lock:
+        try:
+            saved = load(USAGE_CACHE)
+        except (OSError, ValueError):
+            saved = None
+        if saved and saved.pop(email.lower(), None) is not None:
+            dump(USAGE_CACHE, saved)
+    set_alias(email, None)
+    return True
+
+
+def watch_signature():
+    """「登录 / 用量有没有变」的指纹：账号邮箱、令牌、Claude Code 用量缓存时间。
+    Claude Code 经常改 .claude.json 的其他内容，只看这几样，免得无关改动也触发刷新。"""
+    try:
+        conf = load(CONF)
+        cred = load(CRED).get("claudeAiOauth") or {}
+    except (OSError, ValueError):
+        return None
+    cache = conf.get("cachedUsageUtilization") or {}
+    return ((conf.get("oauthAccount") or {}).get("emailAddress"), cred.get("accessToken"),
+            cred.get("refreshToken"), cache.get("fetchedAtMs"))

@@ -14,6 +14,8 @@
 - **登录状态**：登录（约 4 周有效）还剩几天，快到期时变色提醒；短期令牌（约 8 小时）由 Claude Code 自己续期。
 - **手动刷新**：点「刷新」重新读取；标题下显示上次刷新时间。
 - **设置**：右下角「⚙ 设置」，可切换界面语言（中文 / 日本語，立即生效）和「联网查询当前账号的用量」开关；「关于」里有版本号、「检查更新」和「打开下载页」。
+- **账号管理**：每张卡片的「⋯」菜单可以设置备注名、删除不用的账号（正在用的不能删）。
+- **自动发现新账号**：窗口开着时每 2 秒看一眼本机登录文件（不联网），在插件里 `/login` 新账号后马上出现；旧会话把令牌写乱时也会马上提示。
 - **只开一个窗口**：已经开着时再双击，会把原窗口调到最前面。
 - **单个 exe**：约 12 MB，不用装 Python，第一次运行在桌面建快捷方式。
 
@@ -58,6 +60,7 @@ pythonw claude_switch_gui.pyw          # 直接运行
 python -m pip install pyinstaller
 python build.py                        # 生成 dist\ClaudeSwitch.exe 和 zip
 python make_icon.py                    # 改图标时才需要（要 Pillow）
+python -m unittest discover tests      # 单元测试（临时目录里跑，不碰真实账号，不联网）
 ```
 
 | 文件 | 说明 |
@@ -66,6 +69,7 @@ python make_icon.py                    # 改图标时才需要（要 Pillow）
 | `claude_switch_gui.pyw` | tkinter 界面（主窗口 + 设置窗口） |
 | `i18n.py` | 界面文字（中文 / 日本語），新增文字两种语言都要加 |
 | `build.py` | PyInstaller 单文件打包 + 压缩包 |
+| `tests/test_core.py` | 单元测试：账号不一致、限频、切换保留其他设置、本机用量、备注名和删除 |
 | `make_icon.py` / `icon.ico` | 图标 |
 | `使用说明.txt` | 随 exe 一起发布的说明 |
 

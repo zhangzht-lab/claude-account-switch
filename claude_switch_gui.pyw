@@ -13,6 +13,7 @@ import tempfile
 import threading
 import tkinter as tk
 import tkinter.font as tkfont
+from tkinter import messagebox, simpledialog
 import webbrowser
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -23,13 +24,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import claude_switch as cs  # noqa: E402
 from i18n import DEFAULT_LANG, LANGS, STRINGS  # noqa: E402
 
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.3.0"
 REPO_URL = "https://gitee.com/zhang-bantao/claude-account-switch"
 RELEASES_URL = REPO_URL + "/releases"
 LATEST_API = "https://gitee.com/api/v5/repos/zhang-bantao/claude-account-switch/releases/latest"
 FONT = "Microsoft YaHei UI"
 MIN_VISIBLE_CARDS = 2   # 窗口最矮时能看到的卡片数
 MAX_VISIBLE_CARDS = 3   # 窗口最高时能看到的卡片数，更多的用滚动条
+WATCH_MS = 2000         # 每隔多久看一次本机登录文件有没有变
 
 C = {
     "bg": "#F4F5F8",
@@ -74,14 +76,16 @@ def t(key, **kw):
     return s.format(**kw) if kw else s
 
 
-def collect():
+def collect(use_online=True):
     """在后台线程里跑：保存当前账号；开了联网查询就查一次当前账号的用量；再读出所有账号的数据。
-    返回 (账号列表, 联网结果, 不一致)。联网结果是 cs.fetch_current_usage() 的 (code, arg)，没开为 ("off", None)；
-    不一致是 cs.mismatch() 的结果（令牌和账号信息对不上时为 (令牌所属邮箱, 账号信息邮箱)）。"""
+    返回 (账号列表, 联网结果, 不一致)。联网结果是 cs.fetch_current_usage() 的 (code, arg)，没查为 ("off", None)；
+    不一致是 cs.mismatch() 的结果（令牌和账号信息对不上时为 (令牌所属邮箱, 账号信息邮箱)）。
+    use_online=False 用于本机文件变化触发的自动刷新：只读本机，不联网。"""
     mm = cs.mismatch()
     cs.save_current()  # 对不上时它自己会跳过，不保存
-    fetch = cs.fetch_current_usage() if online else ("off", None)
+    fetch = cs.fetch_current_usage() if online and use_online else ("off", None)
     items = cs.profiles()
+    names = cs.aliases()
     now_email = (cs.current()[0] or "").lower()
 
     def one(p):
@@ -93,8 +97,8 @@ def collect():
         except (OSError, ValueError, KeyError):
             oauth = {}
         note = fetch if is_cur and fetch[0] in NOTE_CODES else None
-        return {"path": p, "email": p.stem, "current": is_cur, "usage": usage,
-                "source": source, "at": at, "oauth": oauth, "note": note}
+        return {"path": p, "email": p.stem, "alias": names.get(p.stem.lower()), "current": is_cur,
+                "usage": usage, "source": source, "at": at, "oauth": oauth, "note": note}
 
     with ThreadPoolExecutor(max_workers=max(1, len(items))) as pool:
         return list(pool.map(one, items)), fetch, mm
@@ -237,6 +241,9 @@ class App(Widgets):
         self.build()
         self.refresh()
         self.root.after(60_000, self.tick)
+        self.watch_mtime = self.file_mtimes()
+        self.watch_sig = cs.watch_signature()
+        self.root.after(WATCH_MS, self.watch)
 
         # 建快捷方式要启动 PowerShell，约 1～2 秒，放后台免得窗口卡住
         self.shortcut = False
@@ -432,6 +439,9 @@ class App(Widgets):
         av.create_oval(1, 1, s - 1, s - 1, fill=AVATAR[i % len(AVATAR)], outline="")
         av.create_text(s / 2, s / 2, text=str(i + 1), fill="#FFFFFF", font=(FONT, 11, "bold"))
         av.pack(side="left")
+        more = self.text(top, "⋯", size=13, fg=C["muted"], cursor="hand2", padx=self.px(6))
+        more.pack(side="right", padx=(self.px(6), 0))
+        more.bind("<Button-1>", lambda e: self.account_menu(a, more))
         if cur:
             self.badge(top, t("in_use"), "green").pack(side="right")
         else:
@@ -441,7 +451,11 @@ class App(Widgets):
         info.pack(side="left", padx=(self.px(10), 0))
         line1 = tk.Frame(info, bg=C["card"])
         line1.pack(anchor="w")
-        self.text(line1, a["email"], size=11, bold=True).pack(side="left", padx=(0, self.px(8)))
+        if a.get("alias"):  # 有备注名：备注名加粗，邮箱放后面
+            self.text(line1, a["alias"], size=11, bold=True).pack(side="left", padx=(0, self.px(6)))
+            self.text(line1, a["email"], size=9, fg=C["muted"]).pack(side="left", padx=(0, self.px(8)))
+        else:
+            self.text(line1, a["email"], size=11, bold=True).pack(side="left", padx=(0, self.px(8)))
         if best:
             self.badge(line1, t("best"), "blue").pack(side="left")
         line2 = tk.Frame(info, bg=C["card"])
@@ -518,8 +532,53 @@ class App(Widgets):
             return t("token_expired", who=who)
         return t("token_ok", t=f"{end:%H:%M}", who=who)
 
+    # ---------- 账号菜单（⋯） ----------
+    def account_menu(self, a, anchor):
+        menu = tk.Menu(self.root, tearoff=0, font=(FONT, 10))
+        menu.add_command(label=t("menu_alias"), command=lambda: self.rename(a))
+        if a["current"]:
+            menu.add_command(label=t("menu_delete_current"), state="disabled")
+        else:
+            menu.add_command(label=t("menu_delete"), command=lambda: self.delete(a))
+        menu.tk_popup(anchor.winfo_rootx(), anchor.winfo_rooty() + anchor.winfo_height())
+
+    def rename(self, a):
+        name = simpledialog.askstring(t("alias_title"), t("alias_prompt", email=a["email"]),
+                                      initialvalue=a.get("alias") or "", parent=self.root)
+        if name is None:  # 点了取消
+            return
+        cs.set_alias(a["email"], name)
+        self.refresh(use_online=False)
+
+    def delete(self, a):
+        if not messagebox.askyesno(t("delete_title"), t("delete_confirm", email=a["email"]), parent=self.root):
+            return
+        if cs.delete_account(a["email"]):
+            self.show_banner(t("deleted", email=a["email"]), "green")
+        self.refresh(use_online=False)
+
+    # ---------- 本机文件变化 → 自动刷新 ----------
+    def file_mtimes(self):
+        try:
+            return cs.CONF.stat().st_mtime, cs.CRED.stat().st_mtime
+        except OSError:
+            return None
+
+    def watch(self):
+        """每 2 秒看一眼 .claude.json / .credentials.json：登录账号、令牌或插件的用量缓存变了，
+        就自动刷新一次（只读本机，不联网）。比如在插件里 /login 了新账号，窗口里马上出现。"""
+        mt = self.file_mtimes()
+        if mt != self.watch_mtime:
+            self.watch_mtime = mt
+            sig = cs.watch_signature()
+            if sig != self.watch_sig:
+                self.watch_sig = sig
+                if not self.loading:
+                    self.refresh(use_online=False)
+        self.root.after(WATCH_MS, self.watch)
+
     # ---------- 数据 ----------
-    def refresh(self):
+    def refresh(self, use_online=True):
         if self.loading:
             return
         self.loading = True
@@ -528,7 +587,7 @@ class App(Widgets):
 
         def work():
             try:
-                self.result = ("ok", collect())
+                self.result = ("ok", collect(use_online))
             except Exception as e:  # 网络或文件问题都显示出来，不让窗口崩掉
                 self.result = ("err", e)
 
@@ -597,6 +656,7 @@ class App(Widgets):
             self.show_banner(t("switch_failed", e=e), "red")
             return
         self.show_banner(t("switched", email=a["email"]), "green")
+        self.watch_mtime, self.watch_sig = self.file_mtimes(), cs.watch_signature()  # 自己改的，不用再自动刷新一次
         self.refresh()
 
     # ---------- 设置 ----------
