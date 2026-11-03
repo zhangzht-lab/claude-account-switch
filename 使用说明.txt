@@ -1,4 +1,4 @@
-﻿Claude 账号切换 v1.0.1
+Claude 账号切换 v1.1.0
 ======================
 
 在同一台 Windows 电脑上，给 Claude Code（VS Code 插件或命令行）切换多个 Claude 账号，
@@ -43,11 +43,19 @@
 - 同时只能开一个窗口：已经开着时再双击，会把原来的窗口调到最前面。
 
 
-五、会生成哪些文件
+五、设置（右下角「⚙ 设置」）
+----------------------------
+- 常规：切换界面语言（中文 / 日本語），点一下立即生效，下次打开也会记住。
+- 关于：版本号和项目地址。点「检查更新」看有没有新版本；有的话点「打开下载页」，
+  下载新的压缩包，关掉本工具后用新的 ClaudeSwitch.exe 替换旧的即可，账号数据不受影响。
+
+
+六、会生成哪些文件
 ------------------
 - %USERPROFILE%\.claude-accounts\profiles\<邮箱>.json   每个账号一个，里面是登录令牌
 - %USERPROFILE%\.claude-accounts\claude.json.bak         切换前的配置备份
 - %USERPROFILE%\.claude-accounts\usage-cache.json        最近一次查到的用量（查询失败时显示）
+- %USERPROFILE%\.claude-accounts\settings.json           设置（界面语言）
 - 桌面「切换Claude账号」快捷方式（只在第一次运行时建）
 切换时只改 %USERPROFILE%\.claude\.credentials.json 和 %USERPROFILE%\.claude.json
 里的登录部分，其他设置不动。不写注册表、不开机自启。
@@ -55,7 +63,7 @@
 完全删除：删掉 exe、桌面快捷方式和 %USERPROFILE%\.claude-accounts 文件夹即可。
 
 
-六、注意
+七、注意
 --------
 - .claude-accounts 文件夹里有你的登录令牌，千万不要发给别人或上传到网上。
 - 每个人只保存自己的账号，账号共用违反 Anthropic 的使用条款。

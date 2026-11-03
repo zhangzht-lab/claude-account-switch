@@ -25,6 +25,7 @@ CONF = HOME / ".claude.json"
 STORE = HOME / ".claude-accounts"
 PROFILES = STORE / "profiles"
 USAGE_CACHE = STORE / "usage-cache.json"
+SETTINGS = STORE / "settings.json"
 
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 TOKEN_URL = "https://platform.claude.com/v1/oauth/token"
@@ -140,20 +141,24 @@ def remember_usage(email, usage):
 
 
 def last_usage(email, profile, is_current):
-    """返回 (用量, 时间说明)：先用自己存的，再用 Claude Code 的缓存（只有当前账号有）。"""
+    """返回 (用量, 数据时间)：先用自己存的（时间为秒级时间戳），再用 Claude Code 的缓存（时间为 "cache"）。"""
     try:
         hit = load(USAGE_CACHE).get(email.lower())
     except (OSError, ValueError):
         hit = None
     if hit:
-        return hit["usage"], time.strftime(" %m/%d %H:%M ", time.localtime(hit["at"]))
+        return hit["usage"], hit["at"]
     if is_current:
-        return cached_usage(profile), "上次缓存"
-    return None, ""
+        return cached_usage(profile), "cache"
+    return None, None
 
 
 def get_usage(path, is_current):
-    """返回 (用量 dict 或 None, 说明文字, 本次是否自动续期了令牌)。"""
+    """返回 (用量 dict 或 None, 说明 或 None, 本次是否自动续期了令牌)。
+
+    说明是 {"code": invalid|rate|http|error|wait, "arg": ..., "stale": 时间戳|"cache"|None}，
+    由界面按语言翻译；stale 不为 None 表示显示的是以前的数据。
+    """
     if is_current:
         email, oauth, account = current()
         profile = {"claudeAiOauth": oauth, "oauthAccount": account}
@@ -163,25 +168,37 @@ def get_usage(path, is_current):
     email = path.stem
     refreshed = False
 
-    def fallback(reason):
-        usage, when = last_usage(email, profile, is_current)
-        return usage, (f"{reason}，显示{when}的数据" if usage else reason), refreshed
+    def fallback(code, arg=None):
+        usage, stale = last_usage(email, profile, is_current)
+        return usage, {"code": code, "arg": arg, "stale": stale if usage else None}, refreshed
 
     try:
         if oauth["expiresAt"] < time.time() * 1000 + 60_000:
             if is_current:  # 当前账号由 Claude Code 自己续期，这里不碰，免得把它的令牌顶掉
-                return fallback("令牌等插件续期")
+                return fallback("wait")
             refresh_profile(path, profile)
             refreshed = True
             oauth = profile["claudeAiOauth"]
         usage = http_json(USAGE_URL, token=oauth["accessToken"])
         remember_usage(email, usage)
-        return usage, "", refreshed
+        return usage, None, refreshed
     except urllib.error.HTTPError as e:
         if e.code in (400, 401, 403):
-            return None, "登录已失效，请在 Claude 插件里 /login 这个账号后点「刷新」", refreshed
+            return None, {"code": "invalid", "arg": None, "stale": None}, refreshed
         if e.code == 429:
-            return fallback("查询太频繁被限流，稍后会自动重试")
-        return fallback(f"查询失败（HTTP {e.code}）")
+            return fallback("rate")
+        return fallback("http", e.code)
     except (OSError, ValueError, KeyError) as e:
-        return fallback(f"查询失败（{type(e).__name__}）")
+        return fallback("error", type(e).__name__)
+
+
+def load_settings():
+    try:
+        return load(SETTINGS)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_settings(settings):
+    STORE.mkdir(parents=True, exist_ok=True)
+    dump(SETTINGS, settings)
