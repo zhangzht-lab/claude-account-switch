@@ -7,7 +7,7 @@
 MCP 登录（mcpOAuth）和其他设置不动，所有账号共用。
 
 用量：向 api.anthropic.com/api/oauth/usage 查询（和 Claude Code 里 /usage 同一个接口），
-得到 5 小时额度、本周额度和各自的重置时间。非当前账号的令牌过期时会自动续期并存回。
+得到 5 小时额度、本周额度和各自的重置时间。令牌只由 Claude Code 自己续期，本工具从不刷新令牌。
 """
 
 import json
@@ -28,8 +28,6 @@ USAGE_CACHE = STORE / "usage-cache.json"
 SETTINGS = STORE / "settings.json"
 
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
-TOKEN_URL = "https://platform.claude.com/v1/oauth/token"
-CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"  # Claude Code 的公开 client id
 
 
 def load(path):
@@ -98,23 +96,6 @@ def http_json(url, token=None, body=None):
         return json.load(r)
 
 
-def refresh_profile(path, profile):
-    """非当前账号的令牌过期了：用 refresh token 换新令牌，立即存回档案。"""
-    oauth = profile["claudeAiOauth"]
-    r = http_json(TOKEN_URL, body={
-        "grant_type": "refresh_token",
-        "refresh_token": oauth["refreshToken"],
-        "client_id": CLIENT_ID,
-        "scope": " ".join(oauth.get("scopes") or []),
-    })
-    oauth["accessToken"] = r["access_token"]
-    oauth["refreshToken"] = r.get("refresh_token") or oauth["refreshToken"]
-    oauth["expiresAt"] = int(time.time() * 1000) + int(r["expires_in"]) * 1000
-    if r.get("refresh_token_expires_in"):
-        oauth["refreshTokenExpiresAt"] = int(time.time() * 1000) + int(r["refresh_token_expires_in"]) * 1000
-    dump(path, profile)
-
-
 def cached_usage(profile):
     try:
         cache = load(CONF).get("cachedUsageUtilization") or {}
@@ -154,10 +135,14 @@ def last_usage(email, profile, is_current):
 
 
 def get_usage(path, is_current):
-    """返回 (用量 dict 或 None, 说明 或 None, 本次是否自动续期了令牌)。
+    """返回 (用量 dict 或 None, 说明 或 None)。
 
-    说明是 {"code": invalid|rate|http|error|wait, "arg": ..., "stale": 时间戳|"cache"|None}，
+    说明是 {"code": invalid|rate|http|error|wait|expired, "arg": ..., "stale": 时间戳|"cache"|None}，
     由界面按语言翻译；stale 不为 None 表示显示的是以前的数据。
+
+    本工具从不用刷新令牌换新令牌：刷新令牌是一次性的，换一次旧的就作废，
+    还开着的 Claude Code 会话手里的那份会失效，出现「OAuth session expired」要求重新登录。
+    访问令牌过期了就显示上次的数据，等切换到这个账号后由 Claude Code 自己续期。
     """
     if is_current:
         email, oauth, account = current()
@@ -166,25 +151,20 @@ def get_usage(path, is_current):
         profile = load(path)
         oauth = profile["claudeAiOauth"]
     email = path.stem
-    refreshed = False
 
     def fallback(code, arg=None):
         usage, stale = last_usage(email, profile, is_current)
-        return usage, {"code": code, "arg": arg, "stale": stale if usage else None}, refreshed
+        return usage, {"code": code, "arg": arg, "stale": stale if usage else None}
 
     try:
         if oauth["expiresAt"] < time.time() * 1000 + 60_000:
-            if is_current:  # 当前账号由 Claude Code 自己续期，这里不碰，免得把它的令牌顶掉
-                return fallback("wait")
-            refresh_profile(path, profile)
-            refreshed = True
-            oauth = profile["claudeAiOauth"]
+            return fallback("wait" if is_current else "expired")
         usage = http_json(USAGE_URL, token=oauth["accessToken"])
         remember_usage(email, usage)
-        return usage, None, refreshed
+        return usage, None
     except urllib.error.HTTPError as e:
         if e.code in (400, 401, 403):
-            return None, {"code": "invalid", "arg": None, "stale": None}, refreshed
+            return None, {"code": "invalid", "arg": None, "stale": None}
         if e.code == 429:
             return fallback("rate")
         return fallback("http", e.code)

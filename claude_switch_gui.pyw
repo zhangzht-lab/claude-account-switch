@@ -1,6 +1,6 @@
 """Claude 账号切换 · 图形界面。
 
-切换、用量查询、令牌续期的逻辑都在 claude_switch.py，界面文字在 i18n.py，这里只负责显示。
+切换、用量查询的逻辑都在 claude_switch.py，界面文字在 i18n.py，这里只负责显示。
 用 pythonw 运行就不会弹黑色命令行窗口。
 """
 
@@ -56,7 +56,7 @@ TONES = {  # (文字, 背景)
 }
 AVATAR = ["#D97757", "#7A5AF8", "#2E90FA", "#12B76A", "#F79009", "#EE46BC"]
 NOTE_KEYS = {"invalid": "note_invalid", "rate": "note_rate", "http": "note_http",
-             "error": "note_error", "wait": "note_wait"}
+             "error": "note_error", "wait": "note_wait", "expired": "note_expired"}
 
 lang = DEFAULT_LANG
 
@@ -82,13 +82,13 @@ def collect():
 
     def one(p):
         is_cur = p.stem.lower() == now_email
-        usage, note, refreshed = cs.get_usage(p, is_cur)
+        usage, note = cs.get_usage(p, is_cur)
         try:
             oauth = (cs.current()[1] if is_cur else None) or cs.load(p)["claudeAiOauth"]
         except (OSError, ValueError, KeyError):
             oauth = {}
         return {"path": p, "email": p.stem, "current": is_cur, "usage": usage,
-                "note": note, "refreshed": refreshed, "oauth": oauth}
+                "note": note, "oauth": oauth}
 
     with ThreadPoolExecutor(max_workers=max(1, len(items))) as pool:
         return list(pool.map(one, items))
@@ -495,8 +495,6 @@ class App(Widgets):
             return ""
         end = datetime.fromtimestamp(ms / 1000)
         who = t("renew_plugin") if a["current"] else t("renew_auto")
-        if a["refreshed"]:
-            return t("token_refreshed", t=f"{end:%H:%M}")
         if end < datetime.now():
             return t("token_expired", who=who)
         return t("token_ok", t=f"{end:%H:%M}", who=who)
