@@ -47,6 +47,11 @@ Claude Code 的登录信息存在两个文件里：
 
 切换账号后，**每个**开着 Claude Code 的 VS Code 窗口都要执行一次 `Developer: Reload Window`（或者重启 VS Code），否则旧会话还拿着上一个账号的令牌。
 
+两道保护：
+
+- **账号不一致检测**：没 Reload 的旧会话续期时，可能把它自己账号的令牌写回 `.credentials.json`，而 `.claude.json` 里已经是新账号。这时如果照常保存，会把 A 的令牌存进 B 的档案。工具每次保存前都会比对：当前令牌的刷新令牌、访问令牌或登录有效期（`refreshTokenExpiresAt`，续期后不变）和另一个账号的档案相同，就判定为不一致，暂停保存和联网查询，并显示红色提示，直到 Reload 或切换后恢复。
+- **切换前提醒**：检测到 `claude.exe` 正在运行时，先弹窗确认。Claude Code 运行时也常写 `.claude.json`，同时写可能互相覆盖；切换前会备份到 `claude.json.bak`。
+
 ## 从源码运行 / 打包
 
 需要 Python 3.10+（官方安装包自带 tkinter），没有第三方依赖。

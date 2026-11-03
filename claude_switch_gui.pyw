@@ -13,6 +13,7 @@ import tempfile
 import threading
 import tkinter as tk
 import tkinter.font as tkfont
+from tkinter import messagebox
 import webbrowser
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -23,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import claude_switch as cs  # noqa: E402
 from i18n import DEFAULT_LANG, LANGS, STRINGS  # noqa: E402
 
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.2.1"
 REPO_URL = "https://gitee.com/zhang-bantao/claude-account-switch"
 RELEASES_URL = REPO_URL + "/releases"
 LATEST_API = "https://gitee.com/api/v5/repos/zhang-bantao/claude-account-switch/releases/latest"
@@ -76,8 +77,10 @@ def t(key, **kw):
 
 def collect():
     """在后台线程里跑：保存当前账号；开了联网查询就查一次当前账号的用量；再读出所有账号的数据。
-    返回 (账号列表, 联网结果)。联网结果是 cs.fetch_current_usage() 的 (code, arg)，没开为 ("off", None)。"""
-    cs.save_current()
+    返回 (账号列表, 联网结果, 不一致)。联网结果是 cs.fetch_current_usage() 的 (code, arg)，没开为 ("off", None)；
+    不一致是 cs.mismatch() 的结果（令牌和账号信息对不上时为 (令牌所属邮箱, 账号信息邮箱)）。"""
+    mm = cs.mismatch()
+    cs.save_current()  # 对不上时它自己会跳过，不保存
     fetch = cs.fetch_current_usage() if online else ("off", None)
     items = cs.profiles()
     now_email = (cs.current()[0] or "").lower()
@@ -86,7 +89,8 @@ def collect():
         is_cur = p.stem.lower() == now_email
         usage, source, at = cs.get_usage(p.stem, is_cur)
         try:
-            oauth = (cs.current()[1] if is_cur else None) or cs.load(p)["claudeAiOauth"]
+            # 对不上时当前令牌不是这个账号的，登录 / 令牌信息改用档案里的
+            oauth = (cs.current()[1] if is_cur and not mm else None) or cs.load(p)["claudeAiOauth"]
         except (OSError, ValueError, KeyError):
             oauth = {}
         note = fetch if is_cur and fetch[0] in NOTE_CODES else None
@@ -94,7 +98,7 @@ def collect():
                 "source": source, "at": at, "oauth": oauth, "note": note}
 
     with ThreadPoolExecutor(max_workers=max(1, len(items))) as pool:
-        return list(pool.map(one, items)), fetch
+        return list(pool.map(one, items)), fetch, mm
 
 
 def ensure_shortcut():
@@ -298,14 +302,16 @@ class App(Widgets):
         self.tips = self.text(foot, tips, size=9, fg=C["faint"], bg=C["bg"], justify="left")
         self.tips.pack(side="left", anchor="w")
 
-    def show_banner(self, msg, tone, seconds=3):
-        """提示条放在账号列表上方，倒计时结束自动消失。
+    def show_banner(self, msg, tone, seconds=3, kind=None):
+        """提示条放在账号列表上方，倒计时结束自动消失；seconds=None 时一直显示，直到点 ✕。
 
         出现时卡片区相应变矮（多出的卡片用滚动条看），消失后再恢复，所以窗口大小始终不变（见 fit）。
+        kind 用来认出某一类提示（比如账号不一致的警告），好在问题消失后自动关掉。
         """
         self.hide_banner(refit=False)
         fg, bg = TONES[tone]
         box = tk.Frame(self.root, bg=bg, highlightthickness=1, highlightbackground=fg)
+        box.kind = kind
         self.toast = box
         right = tk.Frame(box, bg=bg)
         right.pack(side="right", padx=(0, self.px(12)))
@@ -314,7 +320,7 @@ class App(Widgets):
         close.bind("<Button-1>", lambda e: self.hide_banner(box))
         count = tk.Label(right, font=(FONT, 9), fg=fg, bg=bg)
         count.pack(side="right", padx=(0, self.px(10)))
-        width = max(self.px(300), self.view.winfo_width() - self.px(150))  # 右边留给倒计时和 ✕
+        width = max(self.px(300), self.root.winfo_width() - self.px(48 + 150))  # 右边留给倒计时和 ✕
         tk.Label(box, text=msg, font=(FONT, 10), fg=fg, bg=bg, justify="left",
                  wraplength=width).pack(side="left", padx=self.px(14), pady=self.px(8))
         box.pack(fill="x", padx=self.px(24), pady=(0, self.px(10)), before=self.view)
@@ -329,7 +335,8 @@ class App(Widgets):
             count.configure(text=t("toast_countdown", n=n))
             box.after(1000, tick, n - 1)
 
-        tick(seconds)
+        if seconds is not None:
+            tick(seconds)
 
     def hide_banner(self, box=None, refit=True):
         """关掉提示条；传了 box 时只关这一条（避免旧倒计时关掉新提示）。"""
@@ -538,11 +545,15 @@ class App(Widgets):
         if kind == "err":
             self.sub.configure(text=t("load_failed", e=val))
             return
-        data, (code, arg) = val
+        data, (code, arg), mm = val
         self.data, self.fetched_at = data, datetime.now()
         self.render(data)
         self.update_sub()
-        if code == "limited":
+        if mm:  # 一直显示，直到问题解决
+            self.show_banner(t("mismatch", owner=mm[0], email=mm[1]), "red", seconds=None, kind="mismatch")
+        elif self.toast is not None and getattr(self.toast, "kind", None) == "mismatch":
+            self.hide_banner()
+        if code == "limited" and not mm:
             self.show_banner(t("online_limited", s=arg), "amber")
 
     def update_sub(self):
@@ -581,6 +592,10 @@ class App(Widgets):
             self.root.geometry(f"+{x}+{y}")
 
     def switch(self, a):
+        # Claude Code 运行时也会写这两个文件，同时写可能互相覆盖：先提醒一下
+        if cs.claude_running() and not messagebox.askokcancel(
+                t("confirm_title"), t("confirm_running", email=a["email"]), parent=self.root):
+            return
         try:
             cs.switch_to(a["path"])
         except Exception as e:

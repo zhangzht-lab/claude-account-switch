@@ -14,6 +14,7 @@ MCP 登录（mcpOAuth）和其他设置不动，所有账号共用。
 import json
 import os
 import shutil
+import subprocess
 import threading
 import time
 import urllib.error
@@ -63,14 +64,57 @@ def profiles():
     return sorted(PROFILES.glob("*.json"), key=lambda p: p.stem.lower())
 
 
-def save_current():
-    """把当前登录的账号存进档案（新账号就新增，老账号就更新令牌）。返回邮箱。"""
+def token_owner(oauth):
+    """当前令牌属于哪个已保存的账号：返回邮箱，档案里找不到返回 None。
+
+    同一次 /login 得到的令牌，续期后访问令牌和刷新令牌会变，但 refreshTokenExpiresAt
+    （登录有效期）不变，所以三样任一相同就认为是同一个账号的登录。
+    """
+    keys = [k for k in ("refreshToken", "accessToken", "refreshTokenExpiresAt") if oauth.get(k)]
+    for p in profiles():
+        try:
+            saved = load(p)["claudeAiOauth"]
+        except (OSError, ValueError, KeyError):
+            continue
+        if any(saved.get(k) == oauth[k] for k in keys):
+            return p.stem
+    return None
+
+
+def mismatch():
+    """检查两个文件是否对得上：令牌其实属于 A、账号信息却写着 B 时返回 (A, B)，否则 None。
+
+    切换后没 Reload 的旧 Claude Code 会话续期时，可能把它自己账号的令牌写回 .credentials.json，
+    这时如果照常保存，就会把 A 的令牌存进 B 的档案，把 B 的档案弄坏。
+    """
     email, oauth, account = current()
     if not email:
+        return None
+    owner = token_owner(oauth)
+    if owner and owner.lower() != email.lower():
+        return owner, email
+    return None
+
+
+def save_current():
+    """把当前登录的账号存进档案（新账号就新增，老账号就更新令牌）。返回邮箱。
+    两个文件对不上（见 mismatch）时不保存，返回 None，免得把档案弄坏。"""
+    email, oauth, account = current()
+    if not email or mismatch():
         return None
     PROFILES.mkdir(parents=True, exist_ok=True)
     dump(PROFILES / f"{email}.json", {"claudeAiOauth": oauth, "oauthAccount": account})
     return email
+
+
+def claude_running():
+    """Claude Code（VS Code 插件或命令行）是否在运行。"""
+    try:
+        out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq claude.exe", "/NH"], capture_output=True,
+                             text=True, errors="ignore", creationflags=0x08000000, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return "claude.exe" in out.lower()
 
 
 def switch_to(path):
@@ -84,6 +128,7 @@ def switch_to(path):
     cred = load(CRED) if CRED.exists() else {}
     cred["claudeAiOauth"] = target["claudeAiOauth"]
     dump(CRED, cred)
+    # Claude Code 运行时也常写 .claude.json：读出后马上写回，尽量缩短两边同时写的窗口
     conf = load(CONF)
     conf["oauthAccount"] = target["oauthAccount"]
     dump(CONF, conf)
@@ -134,11 +179,13 @@ def fetch_current_usage():
 
     只查当前账号、只用还没过期的访问令牌，从不刷新令牌：刷新令牌是一次性的，
     换一次旧的就作废，还开着的 Claude Code 会话会因此掉线（「OAuth session expired」）。
-    返回 (code, arg)：ok / limited(秒数) / wait / invalid / rate / http(状态码) / error(异常名) / none。
+    返回 (code, arg)：ok / limited(秒数) / wait / invalid / rate / http(状态码) / error(异常名) / none / mismatch。
     """
     email, oauth, account = current()
     if not email:
         return "none", None
+    if mismatch():
+        return "mismatch", None  # 令牌和账号对不上，查到的用量会记错账号
     if oauth.get("expiresAt", 0) < time.time() * 1000 + 60_000:
         return "wait", None  # 令牌过期了，等 Claude Code 自己续期
     wait = online_wait()
