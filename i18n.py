@@ -53,7 +53,6 @@ STRINGS = {
         "version": "版本 {v}",
         "about_desc": "在同一台电脑上一键切换 Claude Code（VS Code 插件或命令行）的多个账号，"
                       "查看每个账号的 5 小时 / 本周用量和重置时间。",
-        "project": "项目地址",
         "check_update": "检查更新",
         "open_releases": "打开下载页",
         "checking": "正在检查…",
@@ -111,7 +110,6 @@ STRINGS = {
         "version": "バージョン {v}",
         "about_desc": "1 台の PC で Claude Code（VS Code 拡張機能・CLI）の複数アカウントをワンクリックで切り替え、"
                       "各アカウントの 5 時間 / 週間の使用量とリセット時刻を確認できます。",
-        "project": "プロジェクト",
         "check_update": "更新を確認",
         "open_releases": "ダウンロードページを開く",
         "checking": "確認中…",

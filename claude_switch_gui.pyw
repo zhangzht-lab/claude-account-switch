@@ -199,13 +199,6 @@ class Widgets:
         b.bind("<Leave>", lambda e: b.configure(bg=bg))
         return b
 
-    def link(self, parent, s, url, bg):
-        lb = self.text(parent, s, size=10, fg=C["accent"], bg=bg, cursor="hand2")
-        lb.bind("<Button-1>", lambda e: webbrowser.open(url))
-        lb.bind("<Enter>", lambda e: lb.configure(font=(FONT, 10, "underline")))
-        lb.bind("<Leave>", lambda e: lb.configure(font=(FONT, 10)))
-        return lb
-
     def logo(self, parent, size, bg):
         s = self.px(size)
         cv = tk.Canvas(parent, width=s, height=s, bg=bg, highlightthickness=0)
@@ -690,8 +683,6 @@ class SettingsWindow(tk.Toplevel, Widgets):
 
         self.text(body, t("about_desc"), size=9, fg=C["text"], wraplength=self.px(370),
                   justify="left").pack(anchor="w")
-        self.text(body, t("project"), size=9, fg=C["muted"]).pack(anchor="w", pady=(self.px(10), 0))
-        self.link(body, REPO_URL.replace("https://", ""), REPO_URL, C["card"]).pack(anchor="w")
 
         btns = tk.Frame(body, bg=C["card"])
         btns.pack(anchor="w", pady=(self.px(14), self.px(6)))
