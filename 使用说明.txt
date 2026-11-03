@@ -1,4 +1,4 @@
-Claude 账号切换 v1.0.0
+﻿Claude 账号切换 v1.0.1
 ======================
 
 在同一台 Windows 电脑上，给 Claude Code（VS Code 插件或命令行）切换多个 Claude 账号，

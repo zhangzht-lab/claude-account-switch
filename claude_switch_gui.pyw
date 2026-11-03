@@ -12,6 +12,7 @@ import sys
 import tempfile
 import threading
 import tkinter as tk
+import webbrowser
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
@@ -20,7 +21,8 @@ HERE = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))  # 打包
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import claude_switch as cs  # noqa: E402
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
+REPO_URL = "https://gitee.com/zhang-bantao/claude-account-switch"
 SHORTCUT_NAME = "切换Claude账号.lnk"
 REFRESH_MIN = 5
 FONT = "Microsoft YaHei UI"
@@ -159,7 +161,9 @@ class App:
         self.view.configure(yscrollcommand=self.vbar.set)
         self.view.pack(side="left", fill="both", expand=True, padx=(self.px(24), 0))
         self.cards = tk.Frame(self.view, bg=C["bg"])
-        self.view.create_window(0, 0, window=self.cards, anchor="nw")
+        item = self.view.create_window(0, 0, window=self.cards, anchor="nw")
+        # 窗口比卡片宽时（比如底部文字更长），让卡片跟着撑满
+        self.view.bind("<Configure>", lambda e: self.view.itemconfigure(item, width=e.width))
         root.bind_all("<MouseWheel>", self.on_wheel)
 
         self.text(self.cards, "正在查询用量…", fg=C["muted"], bg=C["bg"]).pack(padx=self.px(220), pady=self.px(40))
@@ -236,9 +240,15 @@ class App:
     def build_footer(self):
         foot = tk.Frame(self.root, bg=C["bg"])
         foot.pack(side="bottom", fill="x", padx=self.px(24), pady=(self.px(2), self.px(14)))
+        # 右下角版本号，点击打开 Gitee 仓库
+        ver = self.text(foot, f"v{APP_VERSION} · Gitee", size=9, fg=C["muted"], bg=C["bg"], cursor="hand2")
+        ver.pack(side="right", anchor="s")
+        ver.bind("<Button-1>", lambda e: webbrowser.open(REPO_URL))
+        ver.bind("<Enter>", lambda e: ver.configure(fg=C["accent"], font=(FONT, 9, "underline")))
+        ver.bind("<Leave>", lambda e: ver.configure(fg=C["muted"], font=(FONT, 9)))
         tips = ("添加账号：插件里 /login 新账号后点「刷新」 · 切换后在 VS Code 执行 Reload Window 生效\n"
-                f"账号保存在 %USERPROFILE%\\{cs.STORE.name}（含登录令牌，不要发给别人） · v{APP_VERSION}")
-        self.text(foot, tips, size=9, fg=C["faint"], bg=C["bg"], justify="left").pack(anchor="w")
+                f"账号保存在 %USERPROFILE%\\{cs.STORE.name}（含登录令牌，不要发给别人）")
+        self.text(foot, tips, size=9, fg=C["faint"], bg=C["bg"], justify="left").pack(side="left", anchor="w")
 
     def show_banner(self, msg, tone):
         for w in self.banner.winfo_children():
