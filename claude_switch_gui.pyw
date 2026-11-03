@@ -146,7 +146,8 @@ def reset_text(iso):
 
 
 def window_pct(u):
-    """返回 (显示的百分比, 是否已过重置时间)。数据是以前记下的，重置时间过了就按 0% 算。"""
+    """返回 (百分比, 是否已过重置时间)。数据是以前记下的，过了重置时间时进度条清空、
+    界面显示「已重置」；排「剩余额度最多」时按 0% 算（额度已经恢复）。"""
     if not u or u.get("utilization") is None:
         return None, False
     if u.get("resets_at") and datetime.fromisoformat(u["resets_at"]).astimezone() <= datetime.now().astimezone():
@@ -461,7 +462,9 @@ class App(Widgets):
             name = t("five_hour" if key == "five_hour" else "week")
             self.text(grid, name, size=10, fg=C["muted"]).grid(row=row, column=0, sticky="w", pady=pady)
             self.bar(grid, pct).grid(row=row, column=1, padx=(self.px(12), self.px(10)), pady=pady)
-            self.text(grid, f"{pct:.0f}%", size=10, bold=True, fg=level_color(pct), width=4,
+            # 过了重置时间：旧数据已经不准，不显示百分比，只写「已重置」
+            self.text(grid, "—" if was_reset else f"{pct:.0f}%", size=10, bold=True,
+                      fg=C["faint"] if was_reset else level_color(pct), width=4,
                       anchor="e").grid(row=row, column=2, sticky="e", pady=pady)
             if was_reset:
                 reset = t("reset_since")
