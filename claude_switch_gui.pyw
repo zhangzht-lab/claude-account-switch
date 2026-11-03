@@ -258,8 +258,7 @@ class App(Widgets):
         pick_font(self.root)
         self.root.title(t("title"))
         self.build_header()
-        self.banner = tk.Frame(self.root, bg=C["bg"])
-        self.banner.pack(fill="x", padx=self.px(24))
+        self.toast = None
         self.build_footer()
         # 卡片放在可滚动的 Canvas 里：账号多或屏幕矮（1366×768）时出现滚动条，而不是被截掉
         self.view = tk.Canvas(self.root, bg=C["bg"], highlightthickness=0)
@@ -301,18 +300,36 @@ class App(Widgets):
         self.tips = self.text(foot, t("footer"), size=9, fg=C["faint"], bg=C["bg"], justify="left")
         self.tips.pack(side="left", anchor="w")
 
-    def show_banner(self, msg, tone):
-        for w in self.banner.winfo_children():
-            w.destroy()
+    def show_banner(self, msg, tone, seconds=3):
+        """提示条浮在卡片区上方（place，不占布局），倒计时结束自动消失，窗口大小不变。"""
+        if self.toast and self.toast.winfo_exists():
+            self.toast.destroy()
         fg, bg = TONES[tone]
-        box = tk.Frame(self.banner, bg=bg, highlightthickness=1, highlightbackground=fg)
-        box.pack(fill="x", pady=(0, self.px(10)))
+        box = tk.Frame(self.root, bg=bg, highlightthickness=1, highlightbackground=fg)
+        self.toast = box
+        right = tk.Frame(box, bg=bg)
+        right.pack(side="right", padx=(0, self.px(12)))
+        close = tk.Label(right, text="✕", font=(FONT, 10), fg=fg, bg=bg, cursor="hand2")
+        close.pack(side="right")
+        close.bind("<Button-1>", lambda e: box.destroy())
+        count = tk.Label(right, font=(FONT, 9), fg=fg, bg=bg)
+        count.pack(side="right", padx=(0, self.px(10)))
+        width = max(self.px(300), self.view.winfo_width() - self.px(150))  # 右边留给倒计时和 ✕
         tk.Label(box, text=msg, font=(FONT, 10), fg=fg, bg=bg, justify="left",
-                 wraplength=self.px(470)).pack(side="left", padx=self.px(14), pady=self.px(8))
-        close = tk.Label(box, text="✕", font=(FONT, 10), fg=fg, bg=bg, cursor="hand2")
-        close.pack(side="right", padx=self.px(12))
-        close.bind("<Button-1>", lambda e: (box.destroy(), self.fit()))
-        self.fit()
+                 wraplength=width).pack(side="left", padx=self.px(14), pady=self.px(8))
+        box.place(in_=self.view, x=0, y=0, relwidth=1.0)
+        box.lift()
+
+        def tick(n):
+            if not box.winfo_exists():
+                return
+            if n <= 0:
+                box.destroy()
+                return
+            count.configure(text=t("toast_countdown", n=n))
+            box.after(1000, tick, n - 1)
+
+        tick(seconds)
 
     def fit(self):
         """卡片区高度在「2 张卡片」到「3 张卡片」之间：窗口只能在这个范围内拉高缩矮，
