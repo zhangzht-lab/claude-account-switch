@@ -22,7 +22,7 @@
 
 ## 下载使用
 
-到 [发行版](https://gitee.com/zhang-bantao/claude-account-switch/releases) 下载 `ClaudeSwitch-v*-win64.zip`，解压后看里面的 `使用说明.txt`。简单来说：
+到 Gitee [发行版](https://gitee.com/zhang-bantao/claude-account-switch/releases)（国内下载快）或 GitHub [Releases](https://github.com/zhangzht-lab/claude-account-switch/releases/latest) 下载 `ClaudeSwitch-v*-win64.zip`，解压后看里面的 `使用说明.txt`。简单来说：
 
 1. 把 `ClaudeSwitch.exe` 放到固定位置，双击打开，Claude Code 当前登录的账号会自动保存。
 2. 在 Claude 插件里 `/login` 另一个账号，回到窗口点「刷新」，就加进来了。每个账号只需要这样做一次。
