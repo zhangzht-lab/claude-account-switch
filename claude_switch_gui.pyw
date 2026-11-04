@@ -26,7 +26,7 @@ import claude_switch as cs  # noqa: E402
 import tray  # noqa: E402
 from i18n import DEFAULT_LANG, LANGS, STRINGS  # noqa: E402
 
-APP_VERSION = "1.3.1"
+APP_VERSION = "1.3.2"
 REPO_URL = "https://gitee.com/zhang-bantao/claude-account-switch"
 RELEASES_URL = REPO_URL + "/releases"
 LATEST_API = "https://gitee.com/api/v5/repos/zhang-bantao/claude-account-switch/releases/latest"
