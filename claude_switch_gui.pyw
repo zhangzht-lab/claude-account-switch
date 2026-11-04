@@ -343,7 +343,7 @@ class App(Widgets):
         tk.Label(box, text=msg, font=(FONT, 10), fg=fg, bg=bg, justify="left",
                  wraplength=width).pack(side="left", padx=self.px(14), pady=self.px(8))
         box.pack(fill="x", padx=self.px(24), pady=(0, self.px(10)), before=self.view)
-        self.fit()
+        # 提示条出现/消失不触发 fit()，彻底避免窗口抖动
 
         def tick(n):
             if self.toast is not box or not box.winfo_exists():
@@ -364,40 +364,44 @@ class App(Widgets):
         if self.toast.winfo_exists():
             self.toast.destroy()
         self.toast = None
-        if refit:
-            self.fit()
+        # 提示条消失不触发 fit()，彻底避免窗口抖动
 
     def fit(self):
-        """卡片区高度在「2 张卡片」到「3 张卡片」之间：窗口只能在这个范围内拉高缩矮，
-        放不下的卡片一律用滚动条看。屏幕太矮时上限再缩，窗口底部不超出屏幕。"""
+        """只在首次设置窗口尺寸范围，之后不再随内容/提示条动态改变，彻底避免抖动。"""
         self.root.update_idletasks()
         need_h, need_w = self.cards.winfo_reqheight(), self.cards.winfo_reqwidth()
         # 底部说明按卡片宽度换行，免得把窗口撑宽或和设置按钮重叠
         self.tips.configure(wraplength=max(self.px(280), need_w - self.settings_btn.winfo_reqwidth() - self.px(16)))
         self.root.update_idletasks()
-        # 提示条占的高度从卡片区里扣，窗口总高度不变
-        toast_h = self.toast.winfo_reqheight() + self.px(10) if self.toast and self.toast.winfo_exists() else 0
-        others = self.root.winfo_reqheight() - int(self.view.cget("height")) - toast_h
-        avail = self.root.winfo_screenheight() - self.px(100) - others  # 留出标题栏和任务栏
-        if self.data:  # 账号卡片
-            heights = [c.winfo_reqheight() + self.px(10) for c in self.cards.winfo_children()]
-            lo, hi = sum(heights[:MIN_VISIBLE_CARDS]), sum(heights[:MAX_VISIBLE_CARDS])
-        else:  # 「正在查询」「还没有账号」这类提示
-            lo = hi = need_h
-        hi = max(self.px(120), min(hi, avail))
-        lo = min(lo, hi)
+        if not self.placed:
+            # 首次：固定窗口可拉伸的最小/最大高度，之后再也不碰
+            others = self.root.winfo_reqheight() - int(self.view.cget("height"))
+            avail = self.root.winfo_screenheight() - self.px(100) - others
+            if self.data:
+                heights = [c.winfo_reqheight() + self.px(10) for c in self.cards.winfo_children()]
+                lo, hi = sum(heights[:MIN_VISIBLE_CARDS]), sum(heights[:MAX_VISIBLE_CARDS])
+                # 实际卡片数对应的高度：1张/2张/3张都各自对应
+                actual_h = sum(heights[: min(len(self.data), MAX_VISIBLE_CARDS)])
+            else:
+                lo = hi = need_h
+                actual_h = need_h
+            hi = max(self.px(120), min(hi, avail))
+            lo = min(lo, hi)
+            # 首次打开时，窗口高度按实际卡片数设置（最多不超过3张，屏幕允许的最大值）
+            target_h = others + actual_h
+            target_h = min(target_h, others + hi)
+            screen_h = self.root.winfo_screenheight()
+            target_h = min(target_h, screen_h - self.px(60))
+            self.root.geometry(f"{self.root.winfo_reqwidth()}x{target_h}")
+            self.root.minsize(self.root.winfo_reqwidth(), others + lo)
+            self.root.maxsize(self.root.winfo_screenwidth(), others + hi)
+        # 画布高度固定，不随 toast 出现/消失而变化；放不下的内容走滚动条
         self.view_need = need_h
-        self.view.configure(width=need_w, height=max(self.px(40), hi - toast_h),
-                            scrollregion=(0, 0, need_w, need_h))
-        self.root.update_idletasks()
-        self.root.minsize(self.root.winfo_reqwidth(), others + lo)
-        self.root.maxsize(self.root.winfo_screenwidth(), others + hi)
+        self.view.configure(width=need_w, scrollregion=(0, 0, need_w, need_h))
+        # 每次布局计算后，滚动条回到顶部，打开窗口默认显示最上面的账号
+        self.view.yview_moveto(0)
         self.update_scrollbar()
         self.root.update_idletasks()
-        bottom = self.root.winfo_rooty() + self.root.winfo_reqheight()
-        limit = self.root.winfo_screenheight() - self.px(60)
-        if self.placed and bottom > limit:
-            self.root.geometry(f"+{self.root.winfo_x()}+{max(0, self.root.winfo_y() - (bottom - limit))}")
 
     def update_scrollbar(self, height=None):
         """按卡片区实际高度决定要不要滚动条（拉伸窗口时也会调用）。"""
@@ -640,9 +644,9 @@ class App(Widgets):
         self.sub.configure(text=t("fetched", time=f"{self.fetched_at:%H:%M}", ago=ago))
 
     def tick(self):
-        """每分钟只在本地更新「几分钟前」和倒计时，不联网；数据要用户点「刷新」才重新查询。"""
+        """每分钟只在本地更新「几分钟前」和倒计时，不联网；数据要用户点「刷新」才重新查询。
+        不再整体重建界面，避免每分钟闪烁一次。"""
         if not self.loading and self.data is not None:
-            self.render(self.data)
             self.update_sub()
         self.root.after(60_000, self.tick)
 
@@ -659,8 +663,10 @@ class App(Widgets):
         for i, a in enumerate(data):
             self.card(i, a, i == best)
         self.fit()
+        # 每次重建卡片后，滚动条回到顶部，打开窗口默认显示最上面的账号
+        self.view.yview_moveto(0)
         self.update_tray(data)
-        if not self.placed:  # 第一次显示时居中
+        if not self.placed:  # 第一次显示时居中，之后不再移动窗口
             self.placed = True
             self.root.update_idletasks()
             w, h = self.root.winfo_reqwidth(), self.root.winfo_reqheight()
