@@ -43,7 +43,7 @@ Claude Code 的登录信息存在两个文件里：
 
 **用量**：
 
-- **当前账号**：设置里「联网查询当前账号的用量」打开时（默认），点「刷新」会用当前账号还没过期的访问令牌查一次 `https://api.anthropic.com/api/oauth/usage`，和 Claude 插件面板显示用量时发的请求一样。只在你点「刷新」（以及打开窗口、切换账号后）时查，**每分钟最多 3 次**（记录在 `online-log.json`，重开程序也算数），超过时提示还要等几秒并显示本机数据。关掉这个开关就完全不联网，只读 Claude Code 缓存在 `%USERPROFILE%\.claude.json` 的 `cachedUsageUtilization`（插件不常更新它，可能不是最新）。
+- **当前账号**：设置里「联网查询当前账号的用量」打开时（默认），点「刷新」会用当前账号还没过期的访问令牌查一次 `https://api.anthropic.com/api/oauth/usage`，和 Claude 插件面板显示用量时发的请求一样。只在你点「刷新」、打开窗口、切换账号后，以及插件把令牌续期写回时（比如切换后 Reload，约 8 小时一次）查，**每分钟最多 3 次**（记录在 `online-log.json`，重开程序也算数），超过时提示还要等几秒并显示本机数据。关掉这个开关就完全不联网，只读 Claude Code 缓存在 `%USERPROFILE%\.claude.json` 的 `cachedUsageUtilization`（插件不常更新它，可能不是最新）。
 - **其他账号**：从不联网，显示上次使用这个账号时记下的数据（`usage-cache.json`）。过了重置时间显示「已重置」。
 
 本工具**从不刷新令牌**。刷新令牌是一次性的，换一次旧的就作废，还开着的 Claude Code 会话手里那份会失效，出现 `OAuth session expired and could not be refreshed` 并要求重新登录（v1.0.0 会这样做，v1.1.0 起已去掉）。访问令牌过期时不查询，等插件自己续期。「关于」页的「检查更新」只在手动点时查询 Gitee。

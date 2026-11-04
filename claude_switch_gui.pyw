@@ -26,7 +26,7 @@ import claude_switch as cs  # noqa: E402
 import tray  # noqa: E402
 from i18n import DEFAULT_LANG, LANGS, STRINGS  # noqa: E402
 
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.3.1"
 REPO_URL = "https://gitee.com/zhang-bantao/claude-account-switch"
 RELEASES_URL = REPO_URL + "/releases"
 LATEST_API = "https://gitee.com/api/v5/repos/zhang-bantao/claude-account-switch/releases/latest"
@@ -499,7 +499,7 @@ class App(Widgets):
                       fg=C["faint"] if was_reset else level_color(pct), width=4,
                       anchor="e").grid(row=row, column=2, sticky="e", pady=pady)
             if was_reset:
-                reset = t("reset_since")
+                reset = t("reset_since_current" if a["current"] else "reset_since")
             else:
                 reset = reset_text(u["resets_at"]) if u.get("resets_at") else ""
                 if pct >= 100:
@@ -578,16 +578,21 @@ class App(Widgets):
             return None
 
     def watch(self):
-        """每 2 秒看一眼 .claude.json / .credentials.json：登录账号、令牌或插件的用量缓存变了，
-        就自动刷新一次（只读本机，不联网）。比如在插件里 /login 了新账号，窗口里马上出现。"""
+        """每 2 秒看一眼 .claude.json / .credentials.json：登录账号、令牌或插件的用量缓存变了，就自动刷新一次。
+        比如在插件里 /login 了新账号，窗口里马上出现。
+
+        只有「换了账号或换了令牌」时才顺便联网查一次当前账号（仍受每分钟 3 次限制）：
+        切换账号后 Reload，插件把过期的令牌续期写回来，这时就能自动显示最新用量。
+        插件约 8 小时才续期一次，所以这种自动查询很少。其他变化只读本机。"""
         mt = self.file_mtimes()
         if mt != self.watch_mtime:
             self.watch_mtime = mt
             sig = cs.watch_signature()
             if sig != self.watch_sig:
+                new_login = self.watch_sig is None or sig is None or sig[:2] != self.watch_sig[:2]  # 邮箱或访问令牌变了
                 self.watch_sig = sig
                 if not self.loading:
-                    self.refresh(use_online=False)
+                    self.refresh(use_online=new_login)
         self.root.after(WATCH_MS, self.watch)
 
     # ---------- 数据 ----------
